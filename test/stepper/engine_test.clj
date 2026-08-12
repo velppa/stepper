@@ -130,8 +130,7 @@
 
 (deftest task-run-file
   (let [script (java.io.File/createTempFile "stepper" ".sh")]
-    (spit script "#!/bin/sh\necho \"file says $1\"\n")
-    (.setExecutable script true)
+    (spit script "echo \"file says $1\"\n")
     (let [result (run {"StartAt" "Run"
                        "States" {"Run" {"Type" "Task"
                                         "Resource" "srn:local:shell:::shell:runFile"

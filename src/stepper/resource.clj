@@ -47,8 +47,8 @@
   [_ {:strs [command] :as arguments}]
   (run-process ["/bin/sh" "-c" (str command)] arguments))
 
-;; Executable file runner.  Arguments:
-;;   file - path to an executable file
+;; Script file runner, via bash.  Arguments:
+;;   file - path to a script file
 ;;   args - list of arguments
 ;;   plus cwd/env/timeout_seconds as in runCommand.
 (defmethod invoke "srn:local:shell:::shell:runFile"
@@ -58,8 +58,4 @@
       (throw (ex-info "file not found"
                       {:error "States.TaskFailed"
                        :cause (str file " does not exist")})))
-    (when-not (.canExecute f)
-      (throw (ex-info "file not executable"
-                      {:error "States.TaskFailed"
-                       :cause (str file " is not executable")})))
-    (run-process (into [(.getAbsolutePath f)] (map str args)) arguments)))
+    (run-process (into ["bash" (.getAbsolutePath f)] (map str args)) arguments)))

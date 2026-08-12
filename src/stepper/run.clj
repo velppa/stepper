@@ -1,6 +1,7 @@
 (ns stepper.run
   "Starting and recording executions."
   (:require [cheshire.core :as json]
+            [clojure.string :as str]
             [stepper.db :as db]
             [stepper.engine :as engine]))
 
@@ -29,6 +30,15 @@
                              :error (:error result)
                              :cause (:cause result)})
       (assoc result :execution-id execution-id))))
+
+(defn execution-srn [machine-name execution-name]
+  (str "srn:local:states:::execution:" machine-name ":" execution-name))
+
+(defn parse-execution-srn
+  "{:machine-name ... :execution-name ...} from an execution SRN."
+  [srn]
+  (let [[machine-name execution-name] (take-last 2 (str/split srn #":"))]
+    {:machine-name machine-name :execution-name execution-name}))
 
 (defn execute-async!
   "Like execute!, but runs in the background; returns the execution id."

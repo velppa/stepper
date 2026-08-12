@@ -39,4 +39,8 @@
       (let [e (first (db/executions ds "sm1"))]
         (is (some? e))
         (is (= 1 (get (json/parse-string (:input e)) "k")))
-        (is (contains? (json/parse-string (:input e)) "time"))))))
+        (is (contains? (json/parse-string (:input e)) "time"))
+        ;; the firing history keeps the execution's SRN
+        (let [f (first (db/firings ds "s1"))]
+          (is (= (str "srn:local:states:::execution:tick-test:" (:name e))
+                 (:execution-srn f))))))))

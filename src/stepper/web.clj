@@ -6,7 +6,8 @@
             [org.httpkit.server :as server]
             [stepper.api :as api]
             [stepper.db :as db]
-            [stepper.run :as run]))
+            [stepper.run :as run]
+            [stepper.scheduler :as scheduler]))
 
 (defn- page [& body]
   {:status 200
@@ -35,14 +36,34 @@
                       {:name (str "web-" (System/currentTimeMillis))}))
 
 (defn- index [ds]
-  (page
-   [:h2 "State machines"]
-   [:table
-    [:tr [:th "name"] [:th "created"]]
-    (for [m (db/state-machines ds)]
-      [:tr
-       [:td [:a {:href (str "/machine/" (:name m))} (:name m)]]
-       [:td (:created-at m)]])]))
+  (let [machines (db/state-machines ds)
+        machine-name (into {} (map (juxt :id :name)) machines)]
+    (page
+     [:h2 "State machines"]
+     [:table
+      [:tr [:th "name"] [:th "created"]]
+      (for [m machines]
+        [:tr
+         [:td [:a {:href (str "/machine/" (:name m))} (:name m)]]
+         [:td (:created-at m)]])]
+     [:h2 "Schedules"]
+     [:form {:method "post" :action "/schedule"}
+      [:select {:name "machine"}
+       (for [m machines] [:option {:value (:name m)} (:name m)])]
+      [:input {:name "expression" :placeholder "rate(30 minutes) or */5 * * * *" :size 30}]
+      [:input {:name "input" :placeholder "{\"input\": \"json\"}" :size 30}]
+      [:button "Add schedule"]]
+     (when-let [ss (seq (db/schedules ds))]
+       [:table
+        [:tr [:th "machine"] [:th "expression"] [:th "next run"] [:th "enabled"] [:th "firings"]]
+        (for [s ss]
+          [:tr
+           [:td [:a {:href (str "/machine/" (machine-name (:state-machine-id s)))}
+                 (machine-name (:state-machine-id s))]]
+           [:td [:a {:href (str "/schedule/" (:id s))} (:expression s)]]
+           [:td (:next-run-at s)]
+           [:td (if (= 1 (:enabled s)) "yes" "no")]
+           [:td (count (db/firings ds (:id s)))]])]))))
 
 (defn- machine-page [ds name]
   (when-let [machine (db/state-machine-by-name ds name)]
@@ -51,16 +72,20 @@
      [:form {:method "post" :action (str "/machine/" name "/start")}
       [:input {:name "input" :placeholder "{\"input\": \"json\"}" :size 60}]
       [:button "Start execution"]]
+     [:h3 "Schedules"]
+     [:form {:method "post" :action (str "/machine/" name "/schedule")}
+      [:input {:name "expression" :placeholder "rate(30 minutes) or */5 * * * *" :size 30}]
+      [:input {:name "input" :placeholder "{\"input\": \"json\"}" :size 30}]
+      [:button "Add schedule"]]
      (when-let [ss (seq (db/schedules ds (:id machine)))]
-       (list
-        [:h3 "Schedules"]
-        [:table
-         [:tr [:th "expression"] [:th "next run"] [:th "enabled"]]
-         (for [s ss]
-           [:tr
-            [:td (:expression s)]
-            [:td (:next-run-at s)]
-            [:td (if (= 1 (:enabled s)) "yes" "no")]])]))
+       [:table
+        [:tr [:th "expression"] [:th "next run"] [:th "enabled"] [:th "firings"]]
+        (for [s ss]
+          [:tr
+           [:td [:a {:href (str "/schedule/" (:id s))} (:expression s)]]
+           [:td (:next-run-at s)]
+           [:td (if (= 1 (:enabled s)) "yes" "no")]
+           [:td (count (db/firings ds (:id s)))]])])
      [:h3 "Executions"]
      [:table
       [:tr [:th "name"] [:th "status"] [:th "started"] [:th "stopped"]]
@@ -93,6 +118,32 @@
          [:td (:state-name ev)]
          [:td [:pre (pretty (:detail ev))]]])]]))
 
+(defn- execution-link
+  "Resolve an execution SRN into a link, plain text when not found."
+  [ds srn]
+  (let [{:keys [machine-name execution-name]} (run/parse-execution-srn srn)
+        machine (db/state-machine-by-name ds machine-name)
+        e (when machine (db/execution-by-name ds (:id machine) execution-name))]
+    (if e
+      [:a {:href (str "/execution/" (:id e))} srn]
+      srn)))
+
+(defn- schedule-page [ds id]
+  (when-let [s (db/schedule ds id)]
+    (let [machine (db/state-machine ds (:state-machine-id s))]
+      (page
+       [:h2 "Schedule " (:expression s)]
+       [:p "machine: " [:a {:href (str "/machine/" (:name machine))} (:name machine)]]
+       [:p "next run: " (:next-run-at s) " — " (if (= 1 (:enabled s)) "enabled" "disabled")]
+       (when (:input s) [:div [:h3 "Input"] [:pre (pretty (:input s))]])
+       [:h3 "Firings"]
+       [:table
+        [:tr [:th "fired at"] [:th "execution"]]
+        (for [f (db/firings ds id)]
+          [:tr
+           [:td (:fired-at f)]
+           [:td (execution-link ds (:execution-srn f))]])]))))
+
 (defn- execution-page [ds id]
   (when-let [e (db/execution ds id)]
     (page
@@ -117,6 +168,22 @@
 
        (re-matches #"/machine/([^/]+)" uri)
        (machine-page ds (second (re-matches #"/machine/([^/]+)" uri)))
+
+       (and (= request-method :post) (re-matches #"/machine/([^/]+)/schedule" uri))
+       (let [name (second (re-matches #"/machine/([^/]+)/schedule" uri))
+             machine (db/state-machine-by-name ds name)
+             params (form-params request)
+             expression (get params "expression")
+             next (scheduler/next-run expression (java.time.Instant/now))]
+         (db/create-schedule! ds {:id (str (random-uuid))
+                                  :state-machine-id (:id machine)
+                                  :expression expression
+                                  :input (not-empty (get params "input"))
+                                  :next-run-at (str next)})
+         {:status 303 :headers {"Location" (str "/machine/" name)}})
+
+       (re-matches #"/schedule/([^/]+)" uri)
+       (schedule-page ds (second (re-matches #"/schedule/([^/]+)" uri)))
 
        (and (= request-method :post) (re-matches #"/machine/([^/]+)/start" uri))
        (let [name (second (re-matches #"/machine/([^/]+)/start" uri))

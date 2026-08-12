@@ -42,3 +42,12 @@ CREATE TABLE IF NOT EXISTS schedule (
   next_run_at      TEXT,
   created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
+
+CREATE TABLE IF NOT EXISTS firing (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  schedule_id   TEXT NOT NULL REFERENCES schedule(id),
+  execution_srn TEXT NOT NULL,          -- srn:local:states:::execution:<machine>:<name>
+  fired_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+
+CREATE INDEX IF NOT EXISTS firing_schedule_id ON firing (schedule_id);

@@ -39,10 +39,11 @@
         machine (db/state-machine ds state-machine-id)
         merged (-> (json/parse-string (or (not-empty input) "{}"))
                    (assoc "time" (str now))
-                   json/generate-string)]
+                   json/generate-string)
+        execution-name (str "schedule-" (System/currentTimeMillis))]
     (db/set-next-run! ds id (str (next-run expression now)))
-    (run/execute-async! ds machine merged
-                        {:name (str "schedule-" (System/currentTimeMillis))})))
+    (db/record-firing! ds id (run/execution-srn (:name machine) execution-name))
+    (run/execute-async! ds machine merged {:name execution-name})))
 
 (defn tick!
   "Fire every due schedule once; returns the fired schedules."

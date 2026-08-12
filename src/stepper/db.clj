@@ -79,3 +79,16 @@
 (defn execution-by-name [ds state-machine-id name]
   (jdbc/execute-one! ds ["SELECT * FROM execution WHERE state_machine_id = ? AND name = ?"
                          state-machine-id name] opts))
+
+(defn schedule [ds id]
+  (jdbc/execute-one! ds ["SELECT * FROM schedule WHERE id = ?" id] opts))
+
+(defn record-firing! [ds schedule-id execution-srn]
+  (jdbc/execute-one! ds ["INSERT INTO firing (schedule_id, execution_srn) VALUES (?, ?)"
+                         schedule-id execution-srn]))
+
+(defn firings
+  "Firing history of a schedule, newest first."
+  [ds schedule-id]
+  (jdbc/execute! ds ["SELECT * FROM firing WHERE schedule_id = ? ORDER BY id DESC"
+                     schedule-id] opts))

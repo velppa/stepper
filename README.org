@@ -16,10 +16,12 @@ cloud.
   - =srn:local:shell:::shell:runCommand= — {command, cwd, env,
     timeout_seconds} via =/bin/sh -c=
   - =srn:local:shell:::shell:runFile= — {file, args, cwd, env,
-    timeout_seconds} runs an executable file
+    timeout_seconds} runs a script file via bash
 - States :: Task, Choice, Wait, Succeed, Fail, Pass, Parallel, Map.
 - Scheduler :: cron (=*/5 * * * *=) or =rate(N minutes)= expressions
   start machines in =serve= mode; fire time passed in input as =time=.
+  Executions are not bound to schedules — the =firing= table keeps the
+  history of firings with the started execution's SRN.
 - UI :: HTMX served by http-kit.
 - API :: AWS Step Functions wire protocol on the same port, so
   =aws stepfunctions --endpoint-url http://localhost:8321= works:
