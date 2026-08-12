@@ -1,0 +1,44 @@
+#+title: Stepper
+
+Local runner for state machines described in [[https://states-language.net/][Amazon States Language]] —
+personal AWS Step Functions.  Deterministic workflows without the
+cloud.
+
+* Design
+- JSONata only :: =QueryLanguage: JSONata=; JSONPath mode is not
+  supported.  Data flow uses =Arguments=, =Output=, =Assign= and
+  =Condition= with the reserved =$states= variable.  Engine:
+  [[https://github.com/dashjoin/jsonata-java][dashjoin/jsonata-java]].
+- Local :: data lives in a SQLite database
+  (=~/.local/share/stepper/stepper.db=), no auth.
+- Tables :: singular — =state_machine=, =execution=, =execution_event=.
+- Task resources :: named by SRN (Stepper Resource Name):
+  - =srn:local:shell:::shell:runCommand= — {command, cwd, env,
+    timeout_seconds} via =/bin/sh -c=
+  - =srn:local:shell:::shell:runFile= — {file, args, cwd, env,
+    timeout_seconds} runs an executable file
+- States :: Task, Choice, Wait, Succeed, Fail, Pass, Parallel, Map.
+- Scheduler :: cron (=*/5 * * * *=) or =rate(N minutes)= expressions
+  start machines in =serve= mode; fire time passed in input as =time=.
+- UI :: HTMX served by http-kit.
+- API :: AWS Step Functions wire protocol on the same port, so
+  =aws stepfunctions --endpoint-url http://localhost:8321= works:
+  Create/List/Describe StateMachine, Start/Describe/List Execution,
+  GetExecutionHistory.
+
+* Usage
+#+begin_src sh
+clojure -M:run create <name> <definition.json>
+clojure -M:run start <name> '<input-json>'
+clojure -M:run list
+clojure -M:run schedule <name> 'rate(30 minutes)' '<input-json>'
+clojure -M:run schedules
+clojure -M:run serve [port]     # UI + API on http://localhost:8321
+
+aws stepfunctions list-state-machines --endpoint-url http://localhost:8321
+#+end_src
+
+* Development
+#+begin_src sh
+clojure -M:test
+#+end_src
