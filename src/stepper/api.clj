@@ -7,11 +7,13 @@
   (:require [cheshire.core :as json]
             [clojure.string :as str]
             [stepper.db :as db]
-            [stepper.run :as run]))
+            [stepper.run :as run]
+            [stepper.validate :as validate]))
 
 (def ^:private arn-prefix "arn:aws:states:local:000000000000")
 
-(defn- machine-arn [name] (str arn-prefix ":stateMachine:" name))
+(defn machine-arn [name] (str arn-prefix ":stateMachine:" name))
+(defn version-arn [name version] (str arn-prefix ":stateMachine:" name ":" version))
 (defn- execution-arn [machine-name execution-name]
   (str arn-prefix ":execution:" machine-name ":" execution-name))
 
@@ -32,16 +34,19 @@
   (let [[machine-name execution-name] (take-last 2 (str/split arn #":"))
         machine (db/state-machine-by-name ds machine-name)]
     (when machine
-      (some-> (db/execution-by-name ds (:id machine) execution-name)
-              (assoc :machine machine)))))
+      (when-let [e (db/execution-by-name ds (:id machine) execution-name)]
+        (assoc e
+               :machine machine
+               :version (some->> (:state-machine-version-id e) (db/version ds)))))))
 
-(defn- describe-execution [{:keys [machine] :as e}]
+(defn- describe-execution [{:keys [machine version] :as e}]
   (cond-> {"executionArn" (execution-arn (:name machine) (:name e))
            "stateMachineArn" (machine-arn (:name machine))
            "name" (:name e)
            "status" (:status e)
            "startDate" (epoch (:started-at e))
            "input" (:input e)}
+    version (assoc "stateMachineVersionArn" (version-arn (:name machine) (:version version)))
     (:stopped-at e) (assoc "stopDate" (epoch (:stopped-at e)))
     (:output e) (assoc "output" (:output e))
     (:error e) (assoc "error" (:error e) "cause" (:cause e))))
@@ -51,12 +56,17 @@
 (defmethod action :default [target _ds _params]
   (api-error "InvalidAction" (str "unsupported action " target)))
 
+(defn- invalid-definition [errors]
+  (api-error "InvalidDefinition" (str/join "; " errors)))
+
 (defmethod action "CreateStateMachine" [_ ds {:strs [name definition]}]
-  (db/create-state-machine! ds {:id (str (random-uuid))
-                                :name name
-                                :definition definition})
-  {"stateMachineArn" (machine-arn name)
-   "creationDate" (epoch (str (java.time.Instant/now)))})
+  (if-let [errors (seq (validate/errors definition))]
+    (invalid-definition errors)
+    (do (db/create-state-machine! ds {:id (str (random-uuid))
+                                      :name name
+                                      :definition definition})
+        {"stateMachineArn" (machine-arn name)
+         "creationDate" (epoch (str (java.time.Instant/now)))})))
 
 (defmethod action "ListStateMachines" [_ ds _]
   {"stateMachines"
@@ -68,20 +78,46 @@
 
 (defmethod action "DescribeStateMachine" [_ ds {:strs [stateMachineArn]}]
   (if-let [m (machine-by-arn ds stateMachineArn)]
-    {"stateMachineArn" stateMachineArn
-     "name" (:name m)
-     "definition" (:definition m)
-     "status" "ACTIVE"
-     "type" "STANDARD"
-     "creationDate" (epoch (:created-at m))}
+    (let [v (db/current-version ds (:id m))]
+      {"stateMachineArn" stateMachineArn
+       "name" (:name m)
+       "definition" (:definition v)
+       "revisionId" (str (:version v))
+       "status" "ACTIVE"
+       "type" "STANDARD"
+       "creationDate" (epoch (:created-at m))})
+    (api-error "StateMachineDoesNotExist" stateMachineArn)))
+
+(defmethod action "UpdateStateMachine" [_ ds {:strs [stateMachineArn definition]}]
+  (if-let [m (machine-by-arn ds stateMachineArn)]
+    (if-let [errors (seq (validate/errors definition))]
+      (invalid-definition errors)
+      (let [v (db/add-version! ds (:id m) definition)]
+        {"updateDate" (epoch (str (java.time.Instant/now)))
+         "revisionId" (str (:version v))
+         "stateMachineVersionArn" (version-arn (:name m) (:version v))}))
+    (api-error "StateMachineDoesNotExist" stateMachineArn)))
+
+(defmethod action "ListStateMachineVersions" [_ ds {:strs [stateMachineArn]}]
+  (if-let [m (machine-by-arn ds stateMachineArn)]
+    {"stateMachineVersions"
+     (for [v (db/versions ds (:id m))]
+       {"stateMachineVersionArn" (version-arn (:name m) (:version v))
+        "creationDate" (epoch (:created-at v))})}
     (api-error "StateMachineDoesNotExist" stateMachineArn)))
 
 (defmethod action "StartExecution" [_ ds {:strs [stateMachineArn name input]}]
   (if-let [m (machine-by-arn ds stateMachineArn)]
-    (let [execution-name (or name (str "api-" (System/currentTimeMillis)))]
-      (run/execute-async! ds m (or input "{}") {:name execution-name})
-      {"executionArn" (execution-arn (:name m) execution-name)
-       "startDate" (epoch (str (java.time.Instant/now)))})
+    (let [execution-name (or name (run/generated-name "api"))]
+      (try
+        (run/execute-async! ds m (or input "{}") {:name execution-name})
+        {"executionArn" (execution-arn (:name m) execution-name)
+         "startDate" (epoch (str (java.time.Instant/now)))}
+        (catch clojure.lang.ExceptionInfo e
+          (api-error (if (db/execution-by-name ds (:id m) execution-name)
+                       "ExecutionAlreadyExists"
+                       "InvalidName")
+                     (str/join "; " (:errors (ex-data e)))))))
     (api-error "StateMachineDoesNotExist" stateMachineArn)))
 
 (defmethod action "DescribeExecution" [_ ds {:strs [executionArn]}]
@@ -93,7 +129,10 @@
   (if-let [m (machine-by-arn ds stateMachineArn)]
     {"executions"
      (for [e (db/executions ds (:id m))]
-       (describe-execution (assoc e :machine m)))}
+       (describe-execution (assoc e
+                                  :machine m
+                                  :version (some->> (:state-machine-version-id e)
+                                                    (db/version ds)))))}
     (api-error "StateMachineDoesNotExist" stateMachineArn)))
 
 (defn- event-details
@@ -132,8 +171,16 @@
   [ds request]
   (when-let [target (get-in request [:headers "x-amz-target"])]
     (let [action-name (last (str/split target #"\."))
-          params (json/parse-string (slurp (or (:body request) "")))
-          result (action action-name ds (or params {}))]
+          params (try (json/parse-string (slurp (or (:body request) "")))
+                      (catch Exception e
+                        {::bad-request (ex-message e)}))
+          result (if-let [message (::bad-request params)]
+                   (api-error "InvalidParameterValue" (str "request body is not JSON — " message))
+                   (try (action action-name ds (or params {}))
+                        (catch Exception e
+                          (api-error "InternalError"
+                                     (str/join "; " (or (:errors (ex-data e))
+                                                        [(ex-message e)]))))))]
       (if (:status result)
         result
         {:status 200

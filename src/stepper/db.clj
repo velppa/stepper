@@ -3,7 +3,8 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [next.jdbc :as jdbc]
-            [next.jdbc.result-set :as rs]))
+            [next.jdbc.result-set :as rs]
+            [stepper.validate :as validate]))
 
 (def default-path
   (or (System/getenv "STEPPER_DB")
@@ -13,17 +14,65 @@
   (io/make-parents path)
   (jdbc/get-datasource {:dbtype "sqlite" :dbname path}))
 
-(defn migrate! [ds]
-  (doseq [stmt (->> (str/split (slurp (io/resource "schema.sql")) #";")
-                    (map str/trim)
-                    (remove str/blank?))]
-    (jdbc/execute! ds [stmt])))
-
 (def ^:private opts {:builder-fn rs/as-unqualified-kebab-maps})
 
-(defn create-state-machine! [ds {:keys [id name definition]}]
-  (jdbc/execute-one! ds ["INSERT INTO state_machine (id, name, definition) VALUES (?, ?, ?)"
-                         id name definition]))
+(defn- statements
+  "SQL statements of a script, comments stripped so a ';' inside one does
+  not split a statement."
+  [sql]
+  (->> (str/split-lines sql)
+       (remove #(str/starts-with? (str/triml %) "--"))
+       (map #(str/replace % #"\s+--\s.*$" ""))
+       (str/join "\n")
+       (#(str/split % #";"))
+       (map str/trim)
+       (remove str/blank?)))
+
+(defn migrate! [ds]
+  (doseq [stmt (statements (slurp (io/resource "schema.sql")))]
+    (jdbc/execute! ds [stmt])))
+
+(defn add-version!
+  "Append DEFINITION as the next version of a state machine; returns the
+  new version row.  Throws ex-info {:errors [...]} when the definition
+  is invalid, so no unusable version is ever stored."
+  [ds state-machine-id definition]
+  (when-let [errors (seq (validate/errors definition))]
+    (throw (ex-info "invalid definition" {:errors errors})))
+  (let [version (inc (or (:version (jdbc/execute-one!
+                                    ds ["SELECT MAX(version) AS version FROM state_machine_version
+                                         WHERE state_machine_id = ?" state-machine-id] opts))
+                         0))
+        id (str (random-uuid))]
+    (jdbc/execute-one! ds ["INSERT INTO state_machine_version (id, state_machine_id, version, definition)
+                            VALUES (?, ?, ?, ?)"
+                           id state-machine-id version definition])
+    (jdbc/execute-one! ds ["UPDATE state_machine
+                            SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?"
+                           state-machine-id])
+    {:id id :state-machine-id state-machine-id :version version :definition definition}))
+
+(defn create-state-machine!
+  "Create a state machine with DEFINITION as version 1.  Throws ex-info
+  {:errors [...]} when the definition is invalid, leaving nothing
+  behind."
+  [ds {:keys [id name definition]}]
+  (jdbc/with-transaction [tx ds]
+    (jdbc/execute-one! tx ["INSERT INTO state_machine (id, name) VALUES (?, ?)" id name])
+    (add-version! tx id definition)))
+
+(defn current-version [ds state-machine-id]
+  (jdbc/execute-one! ds ["SELECT * FROM state_machine_version
+                          WHERE state_machine_id = ? ORDER BY version DESC LIMIT 1"
+                         state-machine-id] opts))
+
+(defn versions [ds state-machine-id]
+  (jdbc/execute! ds ["SELECT * FROM state_machine_version
+                      WHERE state_machine_id = ? ORDER BY version DESC"
+                     state-machine-id] opts))
+
+(defn version [ds id]
+  (jdbc/execute-one! ds ["SELECT * FROM state_machine_version WHERE id = ?" id] opts))
 
 (defn state-machines [ds]
   (jdbc/execute! ds ["SELECT * FROM state_machine ORDER BY name"] opts))
@@ -34,9 +83,10 @@
 (defn state-machine-by-name [ds name]
   (jdbc/execute-one! ds ["SELECT * FROM state_machine WHERE name = ?" name] opts))
 
-(defn create-execution! [ds {:keys [id state-machine-id name input]}]
-  (jdbc/execute-one! ds ["INSERT INTO execution (id, state_machine_id, name, input) VALUES (?, ?, ?, ?)"
-                         id state-machine-id name input]))
+(defn create-execution! [ds {:keys [id state-machine-id state-machine-version-id name input]}]
+  (jdbc/execute-one! ds ["INSERT INTO execution (id, state_machine_id, state_machine_version_id, name, input)
+                          VALUES (?, ?, ?, ?, ?)"
+                         id state-machine-id state-machine-version-id name input]))
 
 (defn finish-execution! [ds id {:keys [status output error cause]}]
   (jdbc/execute-one! ds ["UPDATE execution
@@ -92,3 +142,6 @@
   [ds schedule-id]
   (jdbc/execute! ds ["SELECT * FROM firing WHERE schedule_id = ? ORDER BY id DESC"
                      schedule-id] opts))
+
+(defn set-enabled! [ds id enabled]
+  (jdbc/execute-one! ds ["UPDATE schedule SET enabled = ? WHERE id = ?" (if enabled 1 0) id]))

@@ -3,22 +3,33 @@
 CREATE TABLE IF NOT EXISTS state_machine (
   id         TEXT PRIMARY KEY,
   name       TEXT NOT NULL UNIQUE,
-  definition TEXT NOT NULL,            -- ASL document, JSON
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 
-CREATE TABLE IF NOT EXISTS execution (
+-- Every edit of a definition appends a version. The highest version of
+-- a state machine is the current one.
+CREATE TABLE IF NOT EXISTS state_machine_version (
   id               TEXT PRIMARY KEY,
   state_machine_id TEXT NOT NULL REFERENCES state_machine(id),
-  name             TEXT NOT NULL,
-  status           TEXT NOT NULL DEFAULT 'RUNNING',  -- RUNNING | SUCCEEDED | FAILED | TIMED_OUT | ABORTED
-  input            TEXT,               -- JSON
-  output           TEXT,               -- JSON
-  error            TEXT,
-  cause            TEXT,
-  started_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-  stopped_at       TEXT,
+  version          INTEGER NOT NULL,
+  definition       TEXT NOT NULL,      -- ASL document, JSON
+  created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  UNIQUE (state_machine_id, version)
+);
+
+CREATE TABLE IF NOT EXISTS execution (
+  id                       TEXT PRIMARY KEY,
+  state_machine_id         TEXT NOT NULL REFERENCES state_machine(id),
+  state_machine_version_id TEXT REFERENCES state_machine_version(id),
+  name                     TEXT NOT NULL,
+  status                   TEXT NOT NULL DEFAULT 'RUNNING',  -- RUNNING | SUCCEEDED | FAILED | TIMED_OUT | ABORTED
+  input                    TEXT,       -- JSON
+  output                   TEXT,       -- JSON
+  error                    TEXT,
+  cause                    TEXT,
+  started_at               TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  stopped_at               TEXT,
   UNIQUE (state_machine_id, name)
 );
 

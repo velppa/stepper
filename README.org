@@ -11,13 +11,22 @@ cloud.
   [[https://github.com/dashjoin/jsonata-java][dashjoin/jsonata-java]].
 - Local :: data lives in a SQLite database
   (=~/.local/share/stepper/stepper.db=), no auth.
-- Tables :: singular — =state_machine=, =execution=, =execution_event=.
+- Tables :: singular — =state_machine=, =state_machine_version=,
+  =execution=, =execution_event=, =schedule=, =firing=.
+- Versions :: editing a definition appends a =state_machine_version=;
+  the highest version is the current one.  An execution starts from the
+  current version and stays pinned to it, so editing never changes what
+  a past execution ran.
 - Task resources :: named by SRN (Stepper Resource Name):
   - =srn:local:shell:::shell:runCommand= — {command, cwd, env,
     timeout_seconds} via =/bin/sh -c=
   - =srn:local:shell:::shell:runFile= — {file, args, cwd, env,
     timeout_seconds} runs a script file via bash
 - States :: Task, Choice, Wait, Succeed, Fail, Pass, Parallel, Map.
+- Validation :: a definition is checked before it is stored — JSON,
+  ASL shape, reachable state names and compilable JSONata expressions.
+  The UI, the API and the CLI all report what is wrong and store
+  nothing.
 - Scheduler :: cron (=*/5 * * * *=) or =rate(N minutes)= expressions
   start machines in =serve= mode; fire time passed in input as =time=.
   Executions are not bound to schedules — the =firing= table keeps the
@@ -25,13 +34,15 @@ cloud.
 - UI :: HTMX served by http-kit.
 - API :: AWS Step Functions wire protocol on the same port, so
   =aws stepfunctions --endpoint-url http://localhost:8321= works:
-  Create/List/Describe StateMachine, Start/Describe/List Execution,
-  GetExecutionHistory.
+  Create/Update/List/Describe StateMachine, ListStateMachineVersions,
+  Start/Describe/List Execution, GetExecutionHistory.
 
 * Usage
 #+begin_src sh
 clojure -M:run create <name> <definition.json>
-clojure -M:run start <name> '<input-json>'
+clojure -M:run update <name> <definition.json>   # appends a version
+clojure -M:run versions <name>
+clojure -M:run start <name> '<input-json>' [execution-name]
 clojure -M:run list
 clojure -M:run schedule <name> 'rate(30 minutes)' '<input-json>'
 clojure -M:run schedules
