@@ -8,6 +8,7 @@
             [clojure.string :as str]
             [stepper.db :as db]
             [stepper.run :as run]
+            [stepper.scheduler :as scheduler]
             [stepper.validate :as validate]))
 
 (def ^:private arn-prefix "arn:aws:states:local:000000000000")
@@ -134,6 +135,62 @@
                                   :version (some->> (:state-machine-version-id e)
                                                     (db/version ds)))))}
     (api-error "StateMachineDoesNotExist" stateMachineArn)))
+
+;; Schedules are Stepper's own concept — Step Functions has none — so
+;; these actions are named after it rather than after an AWS API.
+(defn- describe-schedule [ds s]
+  {"scheduleId" (:id s)
+   "stateMachineArn" (machine-arn (:name (db/state-machine ds (:state-machine-id s))))
+   "expression" (:expression s)
+   "eventTemplate" (:input s)
+   "enabled" (= 1 (:enabled s))
+   "nextRunAt" (:next-run-at s)})
+
+(defn- schedule-params
+  "Fields a schedule is created or updated with, defaulting to the
+  current ones when a field is left out."
+  [{:strs [expression eventTemplate enabled]} current]
+  {:expression (or expression (:expression current))
+   :input (or eventTemplate (:input current))
+   :enabled (if (some? enabled) enabled (= 1 (:enabled current)))})
+
+(defmethod action "ListSchedules" [_ ds _]
+  {"schedules" (map #(describe-schedule ds %) (db/schedules ds))})
+
+(defmethod action "CreateSchedule" [_ ds {:strs [stateMachineArn] :as params}]
+  (if-let [m (machine-by-arn ds stateMachineArn)]
+    (let [{:keys [expression input enabled]} (schedule-params params nil)]
+      (if-let [errors (seq (scheduler/errors expression input))]
+        (api-error "InvalidSchedule" (str/join "; " errors))
+        (let [id (str (random-uuid))]
+          (db/create-schedule! ds {:id id
+                                   :state-machine-id (:id m)
+                                   :expression expression
+                                   :input input
+                                   :next-run-at (str (scheduler/next-run
+                                                      expression (java.time.Instant/now)))})
+          (when-not enabled (db/set-enabled! ds id false))
+          (describe-schedule ds (db/schedule ds id)))))
+    (api-error "StateMachineDoesNotExist" stateMachineArn)))
+
+(defmethod action "UpdateSchedule" [_ ds {:strs [scheduleId] :as params}]
+  (if-let [current (db/schedule ds scheduleId)]
+    (let [{:keys [expression input enabled]} (schedule-params params current)]
+      (if-let [errors (seq (scheduler/errors expression input))]
+        (api-error "InvalidSchedule" (str/join "; " errors))
+        (do (db/update-schedule! ds scheduleId
+                                 {:expression expression
+                                  :input input
+                                  :enabled enabled
+                                  :next-run-at (str (scheduler/next-run
+                                                     expression (java.time.Instant/now)))})
+            (describe-schedule ds (db/schedule ds scheduleId)))))
+    (api-error "ScheduleDoesNotExist" scheduleId)))
+
+(defmethod action "DeleteSchedule" [_ ds {:strs [scheduleId]}]
+  (if (db/schedule ds scheduleId)
+    (do (db/delete-schedule! ds scheduleId) {})
+    (api-error "ScheduleDoesNotExist" scheduleId)))
 
 (defn- event-details
   "SFN-shaped details key for an event, so the aws CLI displays them."

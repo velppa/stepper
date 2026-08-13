@@ -2,11 +2,17 @@
   "Starts state machines on a schedule.
 
   Expressions: 5-field UNIX cron (\"*/5 * * * *\") or
-  rate(N seconds|minutes|hours|days).  The fire time is merged into the
-  execution input as \"time\" (ISO-8601)."
+  rate(N seconds|minutes|hours|days).
+
+  A schedule carries an event template — a JSON document whose {% %}
+  expressions are evaluated at fire time and sent to the state machine
+  as its input.  $input.time is the firing time (ISO-8601)."
   (:require [cheshire.core :as json]
+            [clojure.string :as str]
             [stepper.db :as db]
-            [stepper.run :as run])
+            [stepper.engine :as engine]
+            [stepper.run :as run]
+            [stepper.validate :as validate])
   (:import (com.cronutils.model CronType)
            (com.cronutils.model.definition CronDefinitionBuilder)
            (com.cronutils.model.time ExecutionTime)
@@ -34,16 +40,39 @@
           (.orElseThrow)
           (.toInstant)))))
 
+(defn render-event
+  "The input a schedule sends at fire time: its event TEMPLATE with
+  $input.time bound to NOW."
+  [template now]
+  (json/generate-string
+   (engine/render (json/parse-string (or (not-empty template) "{}"))
+                  {"input" {"time" (str now)}})))
+
+(defn errors
+  "Errors of a schedule's EXPRESSION and event TEMPLATE, empty when both
+  are usable."
+  [expression template]
+  (concat
+   (try (next-run expression (Instant/now)) nil
+        (catch Exception e
+          [(str (pr-str expression)
+                " is not a cron expression or rate(N seconds|minutes|hours|days)"
+                " — " (ex-message e))]))
+   (when (not-empty template)
+     (let [parsed (try (json/parse-string template)
+                       (catch Exception e {::unparsable (ex-message e)}))]
+       (if-let [message (::unparsable parsed)]
+         [(str "event template is not valid JSON — " (first (str/split-lines message)))]
+         (validate/expression-errors "event template" parsed))))))
+
 (defn- fire! [ds {:keys [id state-machine-id expression input]}]
   (let [now (Instant/now)
         machine (db/state-machine ds state-machine-id)
-        merged (-> (json/parse-string (or (not-empty input) "{}"))
-                   (assoc "time" (str now))
-                   json/generate-string)
+        event (render-event input now)
         execution-name (run/generated-name "schedule")]
     (db/set-next-run! ds id (str (next-run expression now)))
     (db/record-firing! ds id (run/execution-srn (:name machine) execution-name))
-    (run/execute-async! ds machine merged {:name execution-name})))
+    (run/execute-async! ds machine event {:name execution-name})))
 
 (defn tick!
   "Fire every due schedule once; returns the fired schedules."

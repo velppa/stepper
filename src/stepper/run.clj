@@ -53,6 +53,7 @@
                              :output (some-> (:output result) json/generate-string)
                              :error (:error result)
                              :cause (:cause result)})
+      (db/prune-executions! ds (:id machine))
       (assoc result :execution-id execution-id))))
 
 (defn execution-srn [machine-name execution-name]

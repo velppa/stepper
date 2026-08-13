@@ -28,14 +28,20 @@ cloud.
   The UI, the API and the CLI all report what is wrong and store
   nothing.
 - Scheduler :: cron (=*/5 * * * *=) or =rate(N minutes)= expressions
-  start machines in =serve= mode; fire time passed in input as =time=.
-  Executions are not bound to schedules — the =firing= table keeps the
-  history of firings with the started execution's SRN.
+  start machines in =serve= mode.  A schedule carries an event
+  template — a JSON document whose ={% %}= expressions are evaluated at
+  fire time and sent as the machine's input, with =$input.time= as the
+  firing time.  Executions are not bound to schedules — the =firing=
+  table keeps the history of firings with the started execution's SRN.
+- Retention :: the newest 2000 executions of each state machine are
+  kept, older ones and their events are pruned as executions finish.
 - UI :: HTMX served by http-kit.
 - API :: AWS Step Functions wire protocol on the same port, so
   =aws stepfunctions --endpoint-url http://localhost:8321= works:
   Create/Update/List/Describe StateMachine, ListStateMachineVersions,
-  Start/Describe/List Execution, GetExecutionHistory.
+  Start/Describe/List Execution, GetExecutionHistory.  Schedules are
+  Stepper's own concept and ride the same protocol:
+  List/Create/Update/DeleteSchedule.
 
 * Usage
 #+begin_src sh

@@ -95,8 +95,12 @@
                           WHERE id = ?"
                          status output error cause id]))
 
+;; started_at has millisecond precision, so executions started in the
+;; same millisecond tie; rowid orders those by insertion.
+(def ^:private newest-first "ORDER BY started_at DESC, rowid DESC")
+
 (defn executions [ds state-machine-id]
-  (jdbc/execute! ds ["SELECT * FROM execution WHERE state_machine_id = ? ORDER BY started_at DESC"
+  (jdbc/execute! ds [(str "SELECT * FROM execution WHERE state_machine_id = ? " newest-first)
                      state-machine-id] opts))
 
 (defn execution [ds id]
@@ -145,3 +149,30 @@
 
 (defn set-enabled! [ds id enabled]
   (jdbc/execute-one! ds ["UPDATE schedule SET enabled = ? WHERE id = ?" (if enabled 1 0) id]))
+
+(defn update-schedule! [ds id {:keys [expression input enabled next-run-at]}]
+  (jdbc/execute-one! ds ["UPDATE schedule
+                          SET expression = ?, input = ?, enabled = ?, next_run_at = ?
+                          WHERE id = ?"
+                         expression input (if enabled 1 0) next-run-at id]))
+
+(defn delete-schedule! [ds id]
+  (jdbc/execute! ds ["DELETE FROM firing WHERE schedule_id = ?" id])
+  (jdbc/execute! ds ["DELETE FROM schedule WHERE id = ?" id]))
+
+(def execution-limit
+  "How many executions of a state machine are kept, oldest pruned first."
+  2000)
+
+(defn prune-executions!
+  "Drop everything but the newest KEEP executions of a state machine,
+  their events included.  A schedule's firing history survives — it
+  refers to executions by SRN, so a pruned one simply stops resolving."
+  ([ds state-machine-id] (prune-executions! ds state-machine-id execution-limit))
+  ([ds state-machine-id keep]
+   (let [stale (str "SELECT id FROM execution WHERE state_machine_id = ? "
+                    newest-first " LIMIT -1 OFFSET ?")]
+     (jdbc/execute! ds [(str "DELETE FROM execution_event WHERE execution_id IN (" stale ")")
+                        state-machine-id keep])
+     (jdbc/execute! ds [(str "DELETE FROM execution WHERE id IN (" stale ")")
+                        state-machine-id keep]))))

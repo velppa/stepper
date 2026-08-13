@@ -16,7 +16,10 @@
 (defn- expression? [x]
   (and (string? x) (str/starts-with? x "{%") (str/ends-with? x "%}")))
 
-(defn- expression-errors [where x]
+(defn expression-errors
+  "Errors of every {% %} expression inside X, WHERE naming the place they
+  were found in."
+  [where x]
   (cond
     (expression? x) (try (Jsonata/jsonata (subs x 2 (- (count x) 2))) nil
                          (catch Exception e

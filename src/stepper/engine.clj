@@ -30,6 +30,12 @@
     (sequential? x) (mapv #(eval-template % env) x)
     :else x))
 
+(defn render
+  "Evaluate every {% %} expression inside X with BINDINGS as variables,
+  leaving other values as they are."
+  [x bindings]
+  (eval-template x {:input {} :states {} :variables bindings}))
+
 (defn- states-var [input & {:as extra}]
   (merge {"input" input "context" {}} extra))
 
