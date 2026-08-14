@@ -11,98 +11,78 @@
             [stepper.validate :as validate]))
 
 (def ^:private style
-  "Stepper's stylesheet.  Every rule here is the only rule for what it
-  styles, so a layout is changed by editing it rather than by outweighing
-  a framework."
-  ":root {
-     --bg: #ffffff; --surface: #f6f7f9; --fg: #1c1e21; --muted: #6a7280;
-     --border: #d9dde3; --accent: #2563eb; --on-accent: #ffffff;
-     --green: #15803d; --red: #b91c1c; --amber: #b45309;
-     --radius: 6px;
-     --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}
-   @media (prefers-color-scheme: dark) {
-     :root {
-       --bg: #14171c; --surface: #1b1f26; --fg: #e6e8ec; --muted: #98a1ae;
-       --border: #2c323b; --accent: #5b91f5; --on-accent: #0d1015;
-       --green: #4ade80; --red: #f87171; --amber: #fbbf24}}
+  "Stepper's stylesheet, sharing home-auth's sourcehut flavour: flat,
+  square, compact.  Every rule here is the only rule for what it styles."
+  "/* sourcehut-flavoured: flat, square, compact */
+   :root{color-scheme:light dark;
+   --bg:#fff;--fg:#000;--muted:#555;--rule:#444;--hair:#ddd;
+   --field:#888;--edge:#222;--link:#00e;--danger:#a00;
+   --ok:#070;--warn:#960;
+   --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+   @media (prefers-color-scheme:dark){
+   :root{--bg:#121212;--fg:#ddd;--muted:#999;--rule:#666;--hair:#333;
+   --field:#555;--edge:#aaa;--link:#7ab7ff;--danger:#f66;
+   --ok:#6c6;--warn:#fc6}}
 
-   *, *::before, *::after {box-sizing: border-box}
-   body {margin: 0; background: var(--bg); color: var(--fg);
-         font: 16px/1.55 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-         -webkit-font-smoothing: antialiased}
-   header, main {max-width: 76rem; margin-inline: auto; padding-inline: 1.5rem}
-   header {padding-block: 1.5rem 0}
-   main {padding-bottom: 4rem}
+   *,*::before,*::after{box-sizing:border-box}
+   body{font-family:sans-serif;font-size:.9rem;color:var(--fg);background:var(--bg);
+   max-width:60rem;margin:0 auto;padding:1.5rem 1rem;line-height:1.4}
 
-   h1 {font-size: 1.5rem; margin: 0; letter-spacing: -0.01em}
-   h1 a {color: var(--fg); text-decoration: none}
-   h2 {font-size: 1.25rem; margin: 2rem 0 0.5rem; letter-spacing: -0.01em}
-   h3 {font-size: 0.8rem; margin: 1.75rem 0 0.5rem; color: var(--muted);
-       text-transform: uppercase; letter-spacing: 0.07em}
-   p {margin: 0.5rem 0}
-   a {color: var(--accent); text-underline-offset: 2px}
+   h1{font-size:1.3rem;border-bottom:1px solid var(--rule);
+   padding-bottom:.25rem;margin:0 0 .5rem}
+   h1 a{color:inherit;text-decoration:none}
+   h2{font-size:1.05rem;font-weight:bold;margin:1.75rem 0 .4rem}
+   h3{font-size:.9rem;font-weight:bold;margin:1.5rem 0 .3rem;color:var(--muted)}
+   p{margin:.5rem 0}
+   a{color:var(--link);text-decoration:none}
+   a:hover{text-decoration:underline}
 
-   code, pre {font-family: var(--mono)}
-   code {font-size: 0.9em; background: var(--surface);
-         border: 1px solid var(--border); border-radius: 4px; padding: 0.05em 0.35em}
-   pre {font-size: 0.85rem; background: var(--surface); border: 1px solid var(--border);
-        border-radius: var(--radius); padding: 0.75rem; margin: 0.5rem 0;
-        overflow: auto; max-height: 32em}
-   pre code {background: none; border: 0; padding: 0; font-size: inherit}
+   code,pre{font-family:var(--mono)}
+   code{font-size:.85em;word-break:break-all}
+   pre{font-size:.8rem;border:1px solid var(--hair);padding:.6rem;
+   margin:.5rem 0;overflow:auto;max-height:32em}
+   pre code{font-size:inherit;word-break:normal}
 
-   input, select, textarea, button {
-     font: inherit; color: inherit; margin: 0; padding: 0.45rem 0.65rem;
-     background: var(--bg); border: 1px solid var(--border);
-     border-radius: var(--radius); line-height: 1.4}
-   input::placeholder, textarea::placeholder {color: var(--muted)}
-   input:focus-visible, select:focus-visible,
-   textarea:focus-visible, button:focus-visible {
-     outline: 2px solid var(--accent); outline-offset: 1px}
-   textarea {width: 100%; background: var(--surface);
-             font-family: var(--mono); font-size: 0.85rem; resize: vertical}
-   select {appearance: none; padding-right: 2rem;
-           background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
-                             linear-gradient(135deg, currentColor 50%, transparent 50%);
-           background-position: right 1.1rem center, right 0.8rem center;
-           background-size: 0.3rem 0.3rem; background-repeat: no-repeat}
-   [type=checkbox] {width: 1rem; height: 1rem; padding: 0;
-                    accent-color: var(--accent)}
-   button {background: var(--accent); color: var(--on-accent);
-           border-color: var(--accent); padding-inline: 1rem;
-           font-weight: 500; cursor: pointer}
-   button:hover {filter: brightness(1.1)}
-   .danger {background: none; color: var(--red); border-color: var(--red)}
-   .danger:hover {background: var(--red); color: var(--bg); filter: none}
+   input,select,textarea,button{font-size:15px;padding:.3rem .5rem;
+   border-radius:0;border:1px solid var(--field);box-sizing:border-box;
+   background:var(--bg);color:var(--fg);margin:0}
+   input::placeholder,textarea::placeholder{color:var(--muted)}
+   textarea{width:100%;font-family:var(--mono);font-size:.8rem;resize:vertical}
+   select{appearance:none;padding-right:1.6rem;
+   background-image:linear-gradient(45deg,transparent 50%,currentColor 50%),
+   linear-gradient(135deg,currentColor 50%,transparent 50%);
+   background-position:right .95rem center,right .7rem center;
+   background-size:.25rem .25rem;background-repeat:no-repeat}
+   [type=checkbox]{width:auto;padding:0}
+   button{padding:.25rem .9rem;border:1px solid var(--edge);border-radius:0;
+   font-weight:600;background:var(--bg);color:var(--edge);cursor:pointer}
+   button:hover{background:var(--edge);color:var(--bg)}
+   .danger{border-color:var(--danger);color:var(--danger)}
+   .danger:hover{background:var(--danger);color:var(--bg)}
 
-   /* one shared box height comes from stretch plus identical padding */
-   .row {display: flex; gap: 0.5rem; align-items: stretch; flex-wrap: wrap;
-         margin: 0.75rem 0}
-   .row > input, .row > select {flex: 1 1 14rem; min-width: 0}
-   .fields {display: flex; flex-direction: column; align-items: flex-start;
-            gap: 0.75rem; margin: 0.75rem 0}
-   .fields label {display: flex; flex-direction: column; gap: 0.3rem;
-                  width: 100%; color: var(--muted); font-size: 0.85rem}
-   .fields label:has(> [type=checkbox]) {
-     flex-direction: row; align-items: center; gap: 0.45rem;
-     width: auto; color: var(--fg); font-size: 1rem}
-   .fields > label > input:not([type=checkbox]) {width: min(28rem, 100%)}
+   .row{display:flex;gap:.4rem;align-items:stretch;flex-wrap:wrap;margin:.6rem 0}
+   .row > input,.row > select{flex:1 1 12rem;min-width:0}
+   .fields{display:flex;flex-direction:column;align-items:flex-start;
+   gap:.6rem;margin:.6rem 0}
+   .fields label{display:flex;flex-direction:column;gap:.15rem;
+   width:100%;color:var(--muted);font-size:.85em}
+   .fields label:has(> [type=checkbox]){
+   flex-direction:row;align-items:center;gap:.35rem;
+   width:auto;color:var(--fg);font-size:inherit}
+   .fields > label > input:not([type=checkbox]){width:min(26rem,100%)}
 
-   table {width: 100%; border-collapse: collapse; margin: 0.5rem 0 1rem;
-          font-size: 0.9rem}
-   th {text-align: left; font-size: 0.75rem; font-weight: 600; color: var(--muted);
-       text-transform: uppercase; letter-spacing: 0.05em}
-   th, td {padding: 0.45rem 0.75rem; border-bottom: 1px solid var(--border);
-           white-space: nowrap}
-   tbody tr:hover td {background: var(--surface)}
-   td pre, td code {margin: 0; padding: 0; border: 0; background: none;
-                    white-space: pre-wrap; font-size: 0.8rem}
-   td form {display: inline}
-   td button {padding: 0.1rem 0.55rem; font-size: 0.8rem}
+   table{width:100%;border-collapse:collapse;margin:.4rem 0 1rem;font-size:.85rem}
+   th{text-align:left;font-weight:600;color:var(--muted)}
+   th,td{padding:.25rem .6rem .25rem 0;border-bottom:1px solid var(--hair);
+   white-space:nowrap}
+   td pre,td code{margin:0;padding:0;border:0;white-space:pre-wrap;font-size:.8rem}
+   td form{display:inline}
+   td button{padding:.05rem .5rem;font-size:.8rem}
 
-   .status {font-weight: 600}
-   .SUCCEEDED {color: var(--green)}
-   .FAILED {color: var(--red)}
-   .RUNNING {color: var(--amber)}")
+   .status{font-weight:600}
+   .SUCCEEDED{color:var(--ok)}
+   .FAILED{color:var(--danger)}
+   .RUNNING{color:var(--warn)}")
 
 (defn- render [status & body]
   {:status status
