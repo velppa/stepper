@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!-- Stepper client on m4pro.  Install:
+     cp bin/com.velppa.stepper-client.plist ~/Library/LaunchAgents/
+     launchctl load ~/Library/LaunchAgents/com.velppa.stepper-client.plist -->
+<dict>
+	<key>Label</key>
+	<string>com.velppa.stepper-client</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/Users/pavel/.local/share/mise/installs/java/latest/bin/java</string>
+		<string>-jar</string>
+		<string>/Users/pavel/.velppa/stepper/target/stepper-client.jar</string>
+		<string>https://stepper.hotter.myaddr.dev</string>
+		<string>m4pro</string>
+	</array>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>STEPPER_API_TOKEN</key>
+		<string>269f3d44c2bd1f1012f884319583a618972d1be8a6209dc3</string>
+		<key>PATH</key>
+		<string>/Users/pavel/.local/bin:/Users/pavel/.local/share/mise/shims:/opt/local/bin:/usr/local/bin:/usr/bin:/bin</string>
+	</dict>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>StandardOutPath</key>
+	<string>/Users/pavel/Library/Logs/stepper-client.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/pavel/Library/Logs/stepper-client.log</string>
+</dict>
+</plist>

@@ -8,6 +8,7 @@
   {input, result, errorOutput, context} plus the machine's assigned
   variables."
   (:require [clojure.string :as str]
+            [stepper.dispatch :as dispatch]
             [stepper.jsonata :as jsonata]
             [stepper.resource :as resource]))
 
@@ -60,9 +61,14 @@
 
 (declare run)
 
-(defn- run-task [state env]
-  (let [arguments (eval-template (get state "Arguments" {}) env)]
-    (resource/invoke (get state "Resource") arguments)))
+(defn- run-task [state env {:keys [on-event state-name] :as ctx}]
+  (let [arn (get state "Resource")
+        arguments (eval-template (get state "Arguments" {}) env)]
+    (dispatch/ensure-localhost!)
+    (on-event {:type "TaskScheduled" :state-name state-name
+               :detail {"resource" arn
+                        "client" (resource/arn-client arn)}})
+    (dispatch/execute! arn arguments ctx)))
 
 (defn- run-choice [state env]
   (or (some (fn [{:strs [Condition Next]}]
@@ -94,12 +100,12 @@
 (defn- attempt-state
   "Execute one state attempt.  Returns
   {:result r} | {:next name} | {:end :succeeded/:failed ...}."
-  [state input on-event variables]
+  [state input on-event variables ctx]
   (let [env {:input input :states (states-var input) :variables variables}]
     (case (get state "Type")
       "Pass" {:result input}
 
-      "Task" {:result (run-task state env)}
+      "Task" {:result (run-task state env ctx)}
 
       "Choice" {:next (run-choice state env)}
 
@@ -156,7 +162,8 @@
                        :detail {"input" input}})
           outcome (try
                     (with-retry state on-event state-name
-                      #(attempt-state state input on-event variables))
+                      #(attempt-state state input on-event variables
+                                      {:on-event on-event :state-name state-name}))
                     (catch Exception e {:caught (task-failure e)}))]
       (if-let [{:keys [error cause]} (and (map? outcome) (:caught outcome))]
         ;; Route through Catch or fail the execution.

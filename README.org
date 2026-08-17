@@ -18,9 +18,9 @@ cloud.
   current version and stays pinned to it, so editing never changes what
   a past execution ran.
 - Task resources :: named by SRN (Stepper Resource Name):
-  - =srn:local:shell:::shell:runCommand= — {command, cwd, env,
+  - =arn:localhost:stepper:::shell:runCommand= — {command, cwd, env,
     timeout_seconds} via =/bin/sh -c=
-  - =srn:local:shell:::shell:runFile= — {file, args, cwd, env,
+  - =arn:localhost:stepper:::shell:runFile= — {file, args, cwd, env,
     timeout_seconds} runs a script file via bash
 - States :: Task, Choice, Wait, Succeed, Fail, Pass, Parallel, Map.
 - Validation :: a definition is checked before it is stored — JSON,

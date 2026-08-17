@@ -15,7 +15,7 @@
   (is (empty? (errors {"QueryLanguage" "JSONata"
                        "StartAt" "Run"
                        "States" {"Run" {"Type" "Task"
-                                        "Resource" "srn:local:shell:::shell:runCommand"
+                                        "Resource" "arn:localhost:stepper:::shell:runCommand"
                                         "Arguments" {"command" "{% 'echo ' & $states.input.x %}"}
                                         "Next" "Done"}
                                  "Done" {"Type" "Succeed"}}}))))

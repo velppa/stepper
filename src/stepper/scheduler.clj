@@ -71,7 +71,7 @@
         event (render-event input now)
         execution-name (run/generated-name "schedule")]
     (db/set-next-run! ds id (str (next-run expression now)))
-    (db/record-firing! ds id (run/execution-srn (:name machine) execution-name))
+    (db/record-firing! ds id (run/execution-arn (:name machine) execution-name))
     (run/execute-async! ds machine event {:name execution-name})))
 
 (defn tick!

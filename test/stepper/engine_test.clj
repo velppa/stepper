@@ -35,7 +35,7 @@
   (testing "successful command returns stdout"
     (let [result (run {"StartAt" "Echo"
                        "States" {"Echo" {"Type" "Task"
-                                         "Resource" "srn:local:shell:::shell:runCommand"
+                                         "Resource" "arn:localhost:stepper:::shell:runCommand"
                                          "Arguments" {"command" "{% 'echo ' & $states.input.word %}"}
                                          "Output" "{% $trim($states.result.stdout) %}"
                                          "End" true}}}
@@ -45,7 +45,7 @@
   (testing "non-zero exit fails execution"
     (let [result (run {"StartAt" "Bad"
                        "States" {"Bad" {"Type" "Task"
-                                        "Resource" "srn:local:shell:::shell:runCommand"
+                                        "Resource" "arn:localhost:stepper:::shell:runCommand"
                                         "Arguments" {"command" "exit 3"}
                                         "End" true}}}
                       {})]
@@ -78,7 +78,7 @@
   (testing "catch routes error output"
     (let [result (run {"StartAt" "Bad"
                        "States" {"Bad" {"Type" "Task"
-                                        "Resource" "srn:local:shell:::shell:runCommand"
+                                        "Resource" "arn:localhost:stepper:::shell:runCommand"
                                         "Arguments" {"command" "exit 1"}
                                         "Retry" [{"ErrorEquals" ["States.TaskFailed"]
                                                   "MaxAttempts" 2
@@ -133,7 +133,7 @@
     (spit script "echo \"file says $1\"\n")
     (let [result (run {"StartAt" "Run"
                        "States" {"Run" {"Type" "Task"
-                                        "Resource" "srn:local:shell:::shell:runFile"
+                                        "Resource" "arn:localhost:stepper:::shell:runFile"
                                         "Arguments" {"file" (.getAbsolutePath script)
                                                      "args" ["{% $states.input.word %}"]}
                                         "Output" "{% $trim($states.result.stdout) %}"
@@ -141,3 +141,42 @@
                       {"word" "yes"})]
       (is (= "SUCCEEDED" (:status result)))
       (is (= "file says yes" (:output result))))))
+
+(deftest task-claude-run-prompt
+  (let [stub (java.io.File/createTempFile "claude-stub" "")]
+    (spit stub "#!/bin/sh\necho \"claude got: $1 $2\"\n")
+    (.setExecutable stub true)
+    (testing "runs claude -p with the prompt"
+      (let [result (run {"StartAt" "Ask"
+                         "States" {"Ask" {"Type" "Task"
+                                          "Resource" "arn:localhost:stepper:::claude:runPrompt"
+                                          "Arguments" {"prompt" "{% $states.input.q %}"
+                                                       "claude" (.getAbsolutePath stub)}
+                                          "Output" "{% $trim($states.result.stdout) %}"
+                                          "End" true}}}
+                        {"q" "hello"})]
+        (is (= "SUCCEEDED" (:status result)))
+        (is (= "claude got: -p hello" (:output result)))))
+    (testing "JSON output passes session information through"
+      (let [json-stub (java.io.File/createTempFile "claude-stub" "")]
+        (spit json-stub "#!/bin/sh\necho '{\"result\":\"hi\",\"session_id\":\"abc-123\",\"num_turns\":1}'\n")
+        (.setExecutable json-stub true)
+        (let [result (run {"StartAt" "Ask"
+                           "States" {"Ask" {"Type" "Task"
+                                            "Resource" "arn:localhost:stepper:::claude:runPrompt"
+                                            "Arguments" {"prompt" "hello"
+                                                         "claude" (.getAbsolutePath json-stub)}
+                                            "Output" "{% $states.result.result & \"/\" & $states.result.session_id %}"
+                                            "End" true}}}
+                          {})]
+          (is (= "SUCCEEDED" (:status result)))
+          (is (= "hi/abc-123" (:output result))))))
+    (testing "missing prompt fails the task"
+      (let [result (run {"StartAt" "Ask"
+                         "States" {"Ask" {"Type" "Task"
+                                          "Resource" "arn:localhost:stepper:::claude:runPrompt"
+                                          "Arguments" {"claude" (.getAbsolutePath stub)}
+                                          "End" true}}}
+                        {})]
+        (is (= "FAILED" (:status result)))
+        (is (= "States.TaskFailed" (:error result)))))))

@@ -1,0 +1,22 @@
+{
+  "Comment": "Run the /youtube-monitor Claude skill: summarize new videos from followed channels",
+  "QueryLanguage": "JSONata",
+  "StartAt": "RunMonitor",
+  "States": {
+    "RunMonitor": {
+      "Type": "Task",
+      "Resource": "arn:localhost:stepper:::claude:runPrompt",
+      "Arguments": {
+        "prompt": "Run /youtube-monitor",
+        "claude": "/Users/pavel/.local/bin/claude",
+        "cwd": "/Users/pavel/Notes",
+        "env": {
+          "PATH": "/Users/pavel/.local/bin:/Users/pavel/.local/share/mise/shims:/opt/local/bin:/usr/local/bin:/usr/bin:/bin"
+        },
+        "timeout_seconds": 3600
+      },
+      "Output": "{% $states.result %}",
+      "End": true
+    }
+  }
+}

@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS schedule (
 CREATE TABLE IF NOT EXISTS firing (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   schedule_id   TEXT NOT NULL REFERENCES schedule(id),
-  execution_srn TEXT NOT NULL,          -- srn:local:states:::execution:<machine>:<name>
+  execution_arn TEXT NOT NULL,          -- arn:localhost:stepper:::execution:<machine>:<name>
   fired_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 

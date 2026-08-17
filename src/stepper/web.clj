@@ -5,7 +5,9 @@
             [hiccup2.core :as h]
             [org.httpkit.server :as server]
             [stepper.api :as api]
+            [stepper.auth :as auth]
             [stepper.db :as db]
+            [stepper.dispatch :as dispatch]
             [stepper.run :as run]
             [stepper.scheduler :as scheduler]
             [stepper.validate :as validate]))
@@ -34,6 +36,8 @@
    h2{font-size:1.05rem;font-weight:bold;margin:1.75rem 0 .4rem}
    h3{font-size:.9rem;font-weight:bold;margin:1.5rem 0 .3rem;color:var(--muted)}
    p{margin:.5rem 0}
+   summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--muted);
+   margin:.4rem 0}
    a{color:var(--link);text-decoration:none}
    a:hover{text-decoration:underline}
 
@@ -60,7 +64,7 @@
    .danger{border-color:var(--danger);color:var(--danger)}
    .danger:hover{background:var(--danger);color:var(--bg)}
 
-   .row{display:flex;gap:.4rem;align-items:stretch;flex-wrap:wrap;margin:.6rem 0}
+   .row{display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;margin:.6rem 0}
    .row > input,.row > select{flex:1 1 12rem;min-width:0}
    .fields{display:flex;flex-direction:column;align-items:flex-start;
    gap:.6rem;margin:.6rem 0}
@@ -82,7 +86,12 @@
    .status{font-weight:600}
    .SUCCEEDED{color:var(--ok)}
    .FAILED{color:var(--danger)}
-   .RUNNING{color:var(--warn)}")
+   .RUNNING{color:var(--warn)}
+   .CAUGHT{color:var(--warn)}
+
+   .view strong,.view a{margin-right:.6rem;font-size:.9rem}
+   .tl{position:relative;height:.4rem;width:9rem;background:var(--hair)}
+   .tl b{position:absolute;top:0;bottom:0;background:currentColor}")
 
 (defn- render [status & body]
   {:status status
@@ -106,12 +115,14 @@
 
 (defn- error-page
   "Page listing what is wrong, with the rejected text to fix and resubmit."
-  [status heading errors {:keys [action field text]}]
+  [status heading errors {:keys [action field text hidden]}]
   (render status
           [:h2 heading]
           [:ul (for [e errors] [:li e])]
           (when action
             [:form {:method "post" :action action :class "fields"}
+             (for [[k v] hidden]
+               [:input {:type "hidden" :name k :value v}])
              [:textarea {:name field :rows 20} text]
              [:button "Try again"]])))
 
@@ -122,12 +133,36 @@
     (try (json/generate-string (json/parse-string json-str) {:pretty true})
          (catch Exception _ json-str))))
 
+(def ^:private local-time-format
+  (java.time.format.DateTimeFormatter/ofPattern "yyyy-MM-dd HH:mm:ss"))
+
+(defn- local-time
+  "ISO-8601 instant rendered in the local timezone; text that does not
+  parse is shown as it is."
+  [iso]
+  (when iso
+    (try (-> (java.time.Instant/parse iso)
+             (java.time.ZonedDateTime/ofInstant (java.time.ZoneId/systemDefault))
+             (.format local-time-format))
+         (catch Exception _ iso))))
+
 (defn- start-execution!
   "Kick off an execution in the background; returns its id."
   [ds machine input-json execution-name]
   (run/execute-async! ds machine input-json
                       {:name (or (not-empty execution-name)
                                  (run/generated-name "web"))}))
+
+(def ^:private definition-template
+  "Starter definition pre-filling the create form."
+  (json/generate-string
+   {"Comment" "Hello-world machine"
+    "QueryLanguage" "JSONata"
+    "StartAt" "Hello"
+    "States" {"Hello" {"Type" "Pass"
+                       "Output" "{% 'hello ' & ($states.input.who ? $states.input.who : 'world') %}"
+                       "End" true}}}
+   {:pretty true}))
 
 (defn- toggle-button [s back]
   [:form {:method "post" :action (str "/schedule/" (:id s) "/toggle")
@@ -145,7 +180,24 @@
       (for [m machines]
         [:tr
          [:td [:a {:href (str "/machine/" (:name m))} (:name m)]]
-         [:td (:created-at m)]])]
+         [:td (local-time (:created-at m))]])]
+     [:details
+      [:summary "Create state machine"]
+      [:form {:method "post" :action "/machine" :class "fields"}
+       [:label "name"
+        [:input {:name "name" :placeholder "my-machine"}]]
+       [:label "definition"
+        [:textarea {:name "definition" :rows 12} definition-template]]
+       [:button "Create state machine"]]]
+     (when-let [cs (seq (dispatch/clients))]
+       (list
+        [:h2 "Clients"]
+        [:table
+         [:tr [:th "name"] [:th "last poll"]]
+         (for [[name last-poll] (sort cs)]
+           [:tr
+            [:td name]
+            [:td (some-> last-poll str local-time)]])]))
      [:h2 "Schedules"]
      [:form {:method "post" :action "/schedule" :class "row"}
       [:select {:name "machine"}
@@ -161,7 +213,7 @@
            [:td [:a {:href (str "/machine/" (machine-name (:state-machine-id s)))}
                  (machine-name (:state-machine-id s))]]
            [:td [:a {:href (str "/schedule/" (:id s))} (:expression s)]]
-           [:td (:next-run-at s)]
+           [:td (local-time (:next-run-at s))]
            [:td (if (= 1 (:enabled s)) "yes" "no") " " (toggle-button s "/")]
            [:td (count (db/firings ds (:id s)))]])]))))
 
@@ -183,8 +235,8 @@
          [:td [:a {:href (str "/execution/" (:id e))} (:name e)]]
          [:td (:version v)]
          [:td {:class (str "status " (:status e))} (:status e)]
-         [:td (:started-at e)]
-         [:td (:stopped-at e)]])]
+         [:td (local-time (:started-at e))]
+         [:td (local-time (:stopped-at e))]])]
      (let [versions (db/versions ds (:id machine))
            current (first versions)]
        (list
@@ -199,7 +251,7 @@
          (for [v versions]
            [:tr
             [:td [:a {:href (str "/machine/" name "/version/" (:version v))} (:version v)]]
-            [:td (:created-at v)]])])))))
+            [:td (local-time (:created-at v))]])])))))
 
 (defn- version-page [ds name version]
   (when-let [machine (db/state-machine-by-name ds name)]
@@ -207,38 +259,146 @@
       (page
        [:h2 [:a {:href (str "/machine/" name)} name] " — version " version]
        [:p "ARN: " [:code (api/version-arn name version)]]
-       [:p "created: " (:created-at v)]
+       [:p "created: " (local-time (:created-at v))]
        [:pre (pretty (:definition v))]))))
 
-(defn- execution-fragment [ds id]
-  (let [e (db/execution ds id)]
+(defn- state-specs
+  "NAME -> state spec from a definition, including states nested in
+  Parallel branches and Map item processors."
+  [definition]
+  (loop [acc {} defs [definition]]
+    (if-let [d (first defs)]
+      (let [states (get d "States" {})
+            nested (concat (mapcat #(get % "Branches") (vals states))
+                           (keep #(get % "ItemProcessor") (vals states)))]
+        (recur (merge acc states) (into (vec (rest defs)) nested)))
+      acc)))
+
+(defn- millis [iso] (.toEpochMilli (java.time.Instant/parse iso)))
+
+(defn- duration-str
+  "MS as HH:MM:SS.mmm."
+  [ms]
+  (when ms
+    (let [s (quot ms 1000)]
+      (format "%02d:%02d:%02d.%03d"
+              (quot s 3600) (mod (quot s 60) 60) (mod s 60) (mod ms 1000)))))
+
+(defn- state-visits
+  "Fold the event stream into state visits in entry order:
+  {:name :entered :exited :caught :failed}."
+  [events]
+  (letfn [(open-index [visits name]
+            (->> (range (dec (count visits)) -1 -1)
+                 (filter #(let [v (visits %)]
+                            (and (= name (:name v))
+                                 (nil? (:exited v)) (not (:failed v)))))
+                 first))]
+    (reduce
+     (fn [visits {:keys [type state-name created-at]}]
+       (case type
+         "StateEntered" (conj visits {:name state-name :entered created-at})
+         "StateExited" (if-let [i (open-index visits state-name)]
+                         (assoc-in visits [i :exited] created-at)
+                         visits)
+         "TaskFailed" (if-let [i (open-index visits state-name)]
+                        (assoc-in visits [i :caught] true)
+                        visits)
+         "ExecutionFailed" (if-let [i (open-index visits state-name)]
+                             (update visits i assoc :failed true :exited created-at)
+                             visits)
+         visits))
+     [] events)))
+
+(defn- visit-status [{:keys [exited caught failed]} execution-status]
+  (cond failed "FAILED"
+        (nil? exited) (if (= "RUNNING" execution-status) "RUNNING" "FAILED")
+        caught "CAUGHT"
+        :else "SUCCEEDED"))
+
+(def ^:private status-label
+  {"SUCCEEDED" "Succeeded" "FAILED" "Failed"
+   "RUNNING" "In progress" "CAUGHT" "Caught error"})
+
+(defn- state-view
+  "Per-state table for an execution: status, resource, duration and a
+  timeline bar, states resolved against the pinned definition."
+  [ds e]
+  (let [visits (state-visits (db/events ds (:id e)))
+        specs (some->> (:state-machine-version-id e) (db/version ds)
+                       :definition (#(json/parse-string %)) state-specs)
+        t0 (some-> (first visits) :entered millis)
+        tend (or (some->> (keep :exited visits) seq (map millis) (apply max))
+                 (some-> (:stopped-at e) millis)
+                 (when t0 (System/currentTimeMillis)))
+        total (when t0 (max 1 (- tend t0)))
+        run-start (millis (:started-at e))]
+    [:table
+     [:tr [:th "name"] [:th "type"] [:th "status"] [:th "resource"]
+      [:th "duration"] [:th "timeline"] [:th "started after"]]
+     (for [v visits
+           :let [spec (get specs (:name v))
+                 begin (millis (:entered v))
+                 end (some-> (:exited v) millis)
+                 dur (when end (- end begin))
+                 status (visit-status v (:status e))
+                 left (* 100.0 (/ (- begin t0) total))
+                 width (min (- 100.0 left)
+                            (max 2.0 (* 100.0 (/ (double (or dur (- tend begin))) total))))]]
+       [:tr
+        [:td (:name v)]
+        [:td (get spec "Type")]
+        [:td {:class (str "status " status)} (status-label status)]
+        [:td (some->> (get spec "Resource") (vector :code))]
+        [:td (duration-str dur)]
+        [:td [:div {:class (str "tl " status)}
+              [:b {:style (format "left:%.1f%%;width:%.1f%%" left width)}]]]
+        [:td (duration-str (- begin run-start))]])]))
+
+(defn- event-view [ds id]
+  [:table
+   [:tr [:th "time"] [:th "type"] [:th "state"] [:th "detail"]]
+   (for [ev (db/events ds id)]
+     [:tr
+      [:td (local-time (:created-at ev))]
+      [:td (:type ev)]
+      [:td (:state-name ev)]
+      [:td [:pre (pretty (:detail ev))]]])])
+
+(defn- execution-fragment [ds id view]
+  (let [e (db/execution ds id)
+        view (if (= view "state") "state" "event")]
     [:div (cond-> {:id "execution"}
             (= "RUNNING" (:status e))
-            (assoc :hx-get (str "/execution/" id "/fragment")
+            (assoc :hx-get (str "/execution/" id "/fragment?view=" view)
                    :hx-trigger "every 1s"
                    :hx-swap "outerHTML"))
      [:p "status: " [:strong {:class (str "status " (:status e))} (:status e)]]
      (when (:error e) [:p "error: " (:error e) " — " (:cause e)])
-     (when (:output e) [:div [:h3 "Output"] [:pre (pretty (:output e))]])
-     [:h3 "Events"]
-     [:table
-      [:tr [:th "time"] [:th "type"] [:th "state"] [:th "detail"]]
-      (for [ev (db/events ds id)]
-        [:tr
-         [:td (:created-at ev)]
-         [:td (:type ev)]
-         [:td (:state-name ev)]
-         [:td [:pre (pretty (:detail ev))]]])]]))
+     (when (:output e)
+       (let [output (pretty (:output e))]
+         [:div [:h3 "Output"]
+          [:textarea {:readonly "readonly"
+                      :rows (-> (count (str/split-lines output)) inc (max 8) (min 30))}
+           output]]))
+     [:h3 {:class "view"}
+      (for [[v label] [["event" "Events"] ["state" "States"]]]
+        (if (= v view)
+          [:strong label]
+          [:a {:href (str "/execution/" id "?view=" v)} label]))]
+     (if (= view "state")
+       (state-view ds e)
+       (event-view ds id))]))
 
 (defn- execution-link
-  "Resolve an execution SRN into a link, plain text when not found."
-  [ds srn]
-  (let [{:keys [machine-name execution-name]} (run/parse-execution-srn srn)
+  "Resolve an execution ARN into a link, plain text when not found."
+  [ds arn]
+  (let [{:keys [machine-name execution-name]} (run/parse-execution-arn arn)
         machine (db/state-machine-by-name ds machine-name)
         e (when machine (db/execution-by-name ds (:id machine) execution-name))]
     (if e
-      [:a {:href (str "/execution/" (:id e))} srn]
-      srn)))
+      [:a {:href (str "/execution/" (:id e))} arn]
+      arn)))
 
 (defn- schedule-page [ds id]
   (when-let [s (db/schedule ds id)]
@@ -246,8 +406,7 @@
       (page
        [:h2 "Schedule " (:expression s)]
        [:p "machine: " [:a {:href (str "/machine/" (:name machine))} (:name machine)]]
-       [:p "next run: " (:next-run-at s) " — " (if (= 1 (:enabled s)) "enabled" "disabled")
-        " " (toggle-button s (str "/schedule/" id))]
+       [:p "next run: " (local-time (:next-run-at s))]
        [:h3 "Edit"]
        ;; the buttons live outside the form so they sit side by side,
        ;; tied back to it by the form attribute
@@ -260,19 +419,19 @@
         [:label [:input (cond-> {:type "checkbox" :name "enabled"}
                           (= 1 (:enabled s)) (assoc :checked "checked"))]
          "enabled"]]
+       [:form {:id "delete" :method "post" :action (str "/schedule/" id "/delete")}]
        [:div {:class "row"}
         [:button {:form "edit"} "Save"]
-        [:form {:method "post" :action (str "/schedule/" id "/delete")}
-         [:button {:class "danger"} "Delete schedule"]]]
+        [:button {:form "delete" :class "danger"} "Delete schedule"]]
        [:h3 "Firings"]
        [:table
         [:tr [:th "fired at"] [:th "execution"]]
         (for [f (db/firings ds id)]
           [:tr
-           [:td (:fired-at f)]
-           [:td (execution-link ds (:execution-srn f))]])]))))
+           [:td (local-time (:fired-at f))]
+           [:td (execution-link ds (:execution-arn f))]])]))))
 
-(defn- execution-page [ds id]
+(defn- execution-page [ds id view]
   (when-let [e (db/execution ds id)]
     (page
      [:h2 "Execution " (:name e)]
@@ -284,7 +443,7 @@
                 [:a {:href (str "/machine/" (:name machine) "/version/" (:version v))}
                  (:version v)]))])
      (when (:input e) [:div [:h3 "Input"] [:pre (pretty (:input e))]])
-     (execution-fragment ds id))))
+     (execution-fragment ds id view))))
 
 (defn- form-params [{:keys [body]}]
   (into {}
@@ -293,6 +452,9 @@
               :when k]
           [k (java.net.URLDecoder/decode (or v "") "UTF-8")])))
 
+(defn- view-param [request]
+  (some->> (:query-string request) (re-find #"view=([a-z]+)") second))
+
 (defn- route [ds]
   (fn [{:keys [uri request-method] :as request}]
     (or
@@ -300,6 +462,45 @@
      (cond
        (= uri "/")
        (index ds)
+
+       ;; client long-poll: the next Task for the client, 204 when none
+       ;; arrived within the window; polling doubles as the heartbeat
+       (re-matches #"/client/([^/]+)/poll" uri)
+       (if-let [task (dispatch/poll! (second (re-matches #"/client/([^/]+)/poll" uri))
+                                     30000)]
+         {:status 200 :headers {"Content-Type" "application/json"}
+          :body (json/generate-string task)}
+         {:status 204})
+
+       (and (= request-method :post) (re-matches #"/client/([^/]+)/result" uri))
+       (let [{:strs [id result error cause]} (json/parse-string (slurp (:body request)))]
+         (if (dispatch/complete! id (if error
+                                      {:error error :cause cause}
+                                      {:result result}))
+           {:status 200 :body "ok"}
+           {:status 404 :body "unknown task"}))
+
+       (and (= request-method :post) (= uri "/machine"))
+       (let [params (form-params request)
+             name (str/trim (get params "name" ""))
+             definition (get params "definition")
+             errors (concat
+                     (cond
+                       (not (re-matches #"[A-Za-z0-9_-]{1,80}" name))
+                       ["name must be 1-80 characters of letters, digits, - or _"]
+                       (db/state-machine-by-name ds name)
+                       [(str "state machine " (pr-str name) " already exists")])
+                     (validate/errors definition))]
+         (if (seq errors)
+           (error-page 400 "State machine was not created" errors
+                       {:action "/machine"
+                        :field "definition"
+                        :text definition
+                        :hidden {"name" name}})
+           (do (db/create-state-machine! ds {:id (str (random-uuid))
+                                             :name name
+                                             :definition definition})
+               {:status 303 :headers {"Location" (str "/machine/" name)}})))
 
        (re-matches #"/machine/([^/]+)" uri)
        (machine-page ds (second (re-matches #"/machine/([^/]+)" uri)))
@@ -387,10 +588,12 @@
        (re-matches #"/execution/([^/]+)/fragment" uri)
        {:status 200
         :headers {"Content-Type" "text/html"}
-        :body (str (h/html (execution-fragment ds (second (re-matches #"/execution/([^/]+)/fragment" uri)))))}
+        :body (str (h/html (execution-fragment ds (second (re-matches #"/execution/([^/]+)/fragment" uri))
+                                               (view-param request))))}
 
        (re-matches #"/execution/([^/]+)" uri)
-       (execution-page ds (second (re-matches #"/execution/([^/]+)" uri))))
+       (execution-page ds (second (re-matches #"/execution/([^/]+)" uri))
+                       (view-param request)))
      (render 404 [:h2 "Not found"] [:p uri]))))
 
 (defn- handler
@@ -405,6 +608,9 @@
                          {}))))))
 
 (defn serve [ds port]
-  (server/run-server (handler ds) {:port port})
+  ;; long-polling clients each hold a worker thread for up to 30s -
+  ;; keep enough workers that the UI stays responsive next to them
+  (server/run-server (auth/wrap (auth/config) (handler ds))
+                     {:port port :thread 16})
   (println (str "listening on http://localhost:" port))
   @(promise))

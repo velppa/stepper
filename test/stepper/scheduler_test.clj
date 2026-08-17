@@ -52,8 +52,8 @@
         (is (string? (get (json/parse-string (:input e)) "at")))
         ;; the firing history keeps the execution's SRN
         (let [f (first (db/firings ds "s1"))]
-          (is (= (str "srn:local:states:::execution:tick-test:" (:name e))
-                 (:execution-srn f))))))))
+          (is (= (str "arn:localhost:stepper:::execution:tick-test:" (:name e))
+                 (:execution-arn f))))))))
 
 (deftest event-template-is-jsonata
   (let [now (Instant/parse "2026-08-12T10:00:00Z")]

@@ -1,0 +1,17 @@
+{
+  "Comment": "Demo of a Task executed by a remote client (m4pro)",
+  "QueryLanguage": "JSONata",
+  "StartAt": "EchoRemotely",
+  "States": {
+    "EchoRemotely": {
+      "Type": "Task",
+      "Resource": "arn:m4pro:stepper:::shell:runCommand",
+      "Arguments": {
+        "command": "{% 'echo hello from ' & $states.input.who %}",
+        "timeout_seconds": 30
+      },
+      "Output": "{% $trim($states.result.stdout) %}",
+      "End": true
+    }
+  }
+}

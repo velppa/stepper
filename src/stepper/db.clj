@@ -137,9 +137,9 @@
 (defn schedule [ds id]
   (jdbc/execute-one! ds ["SELECT * FROM schedule WHERE id = ?" id] opts))
 
-(defn record-firing! [ds schedule-id execution-srn]
-  (jdbc/execute-one! ds ["INSERT INTO firing (schedule_id, execution_srn) VALUES (?, ?)"
-                         schedule-id execution-srn]))
+(defn record-firing! [ds schedule-id execution-arn]
+  (jdbc/execute-one! ds ["INSERT INTO firing (schedule_id, execution_arn) VALUES (?, ?)"
+                         schedule-id execution-arn]))
 
 (defn firings
   "Firing history of a schedule, newest first."
@@ -167,7 +167,7 @@
 (defn prune-executions!
   "Drop everything but the newest KEEP executions of a state machine,
   their events included.  A schedule's firing history survives — it
-  refers to executions by SRN, so a pruned one simply stops resolving."
+  refers to executions by ARN, so a pruned one simply stops resolving."
   ([ds state-machine-id] (prune-executions! ds state-machine-id execution-limit))
   ([ds state-machine-id keep]
    (let [stale (str "SELECT id FROM execution WHERE state_machine_id = ? "

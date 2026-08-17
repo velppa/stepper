@@ -52,3 +52,12 @@
     ;; as is a name that would not survive an ARN
     (is (thrown? clojure.lang.ExceptionInfo
                  (run/execute! ds machine "{}" {:name "has spaces"})))))
+
+(deftest async-execution-is-visible-immediately
+  (let [ds (fresh-db)
+        _ (db/create-state-machine! ds {:id "sm1" :name "m" :definition (definition "one")})
+        machine (db/state-machine ds "sm1")
+        id (run/execute-async! ds machine "{}" {:name "eager"})]
+    ;; the row exists as soon as the caller has the id, not when the
+    ;; background run gets around to it
+    (is (some? (db/execution ds id)))))
