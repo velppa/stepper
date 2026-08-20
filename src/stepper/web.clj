@@ -88,6 +88,7 @@
    .FAILED{color:var(--danger)}
    .RUNNING{color:var(--warn)}
    .CAUGHT{color:var(--warn)}
+   .ABORTED{color:var(--muted)}
 
    .view strong,.view a{margin-right:.6rem;font-size:.9rem}
    .tl{position:relative;height:.4rem;width:9rem;background:var(--hair)}
@@ -312,13 +313,17 @@
 
 (defn- visit-status [{:keys [exited caught failed]} execution-status]
   (cond failed "FAILED"
-        (nil? exited) (if (= "RUNNING" execution-status) "RUNNING" "FAILED")
+        (nil? exited) (case execution-status
+                        "RUNNING" "RUNNING"
+                        "ABORTED" "ABORTED"
+                        "FAILED")
         caught "CAUGHT"
         :else "SUCCEEDED"))
 
 (def ^:private status-label
   {"SUCCEEDED" "Succeeded" "FAILED" "Failed"
-   "RUNNING" "In progress" "CAUGHT" "Caught error"})
+   "RUNNING" "In progress" "CAUGHT" "Caught error"
+   "ABORTED" "Aborted"})
 
 (defn- state-view
   "Per-state table for an execution: status, resource, duration and a
@@ -373,7 +378,12 @@
             (assoc :hx-get (str "/execution/" id "/fragment?view=" view)
                    :hx-trigger "every 1s"
                    :hx-swap "outerHTML"))
-     [:p "status: " [:strong {:class (str "status " (:status e))} (:status e)]]
+     [:p "status: " [:strong {:class (str "status " (:status e))} (:status e)]
+      (when (= "RUNNING" (:status e))
+        (list " "
+              [:form {:method "post" :action (str "/execution/" id "/stop")
+                      :style "display:inline"}
+               [:button {:class "danger"} "Stop"]]))]
      (when (:error e) [:p "error: " (:error e) " — " (:cause e)])
      (when (:output e)
        (let [output (pretty (:output e))]
@@ -584,6 +594,11 @@
              (error-page 400 (str "Execution of " name " was not started")
                          (:errors (ex-data e))
                          {}))))
+
+       (and (= request-method :post) (re-matches #"/execution/([^/]+)/stop" uri))
+       (let [id (second (re-matches #"/execution/([^/]+)/stop" uri))]
+         (run/stop-execution! ds id)
+         {:status 303 :headers {"Location" (str "/execution/" id)}})
 
        (re-matches #"/execution/([^/]+)/fragment" uri)
        {:status 200

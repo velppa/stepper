@@ -41,9 +41,16 @@
     (let [process (.start builder)
           stdout (future (slurp (.getInputStream process)))
           stderr (future (slurp (.getErrorStream process)))]
-      (when-not (if timeout_seconds
-                  (.waitFor process (long timeout_seconds) java.util.concurrent.TimeUnit/SECONDS)
-                  (do (.waitFor process) true))
+      (when-not (try
+                  (if timeout_seconds
+                    (.waitFor process (long timeout_seconds) java.util.concurrent.TimeUnit/SECONDS)
+                    (do (.waitFor process) true))
+                  ;; interrupt = the task was stopped: take the process down with it
+                  (catch InterruptedException _
+                    (.destroyForcibly process)
+                    (throw (ex-info "command stopped"
+                                    {:error "States.Aborted"
+                                     :cause (str (first argv) " stopped")}))))
         (.destroyForcibly process)
         (throw (ex-info "command timed out"
                         {:error "States.Timeout"

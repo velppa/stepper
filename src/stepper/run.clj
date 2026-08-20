@@ -3,6 +3,7 @@
   (:require [cheshire.core :as json]
             [clojure.string :as str]
             [stepper.db :as db]
+            [stepper.dispatch :as dispatch]
             [stepper.engine :as engine]
             [stepper.validate :as validate]))
 
@@ -39,20 +40,29 @@
                               :input input-json})
     {:execution-id execution-id :version version}))
 
+(defonce ^:private abort-flags
+  ;; execution id -> atom flipped true by stop-execution!
+  (atom {}))
+
 (defn- run-execution!
   "Run a started execution to completion, recording events and the
   outcome.  Returns the engine result with :execution-id added."
   [ds machine input-json {:keys [execution-id version]}]
-  (let [result (try
+  (let [flag (atom false)
+        _ (swap! abort-flags assoc execution-id flag)
+        result (try
                  (engine/run (json/parse-string (:definition version))
                              (json/parse-string (or (not-empty input-json) "{}"))
                              (fn [{:keys [type state-name detail]}]
                                (db/record-event! ds {:execution-id execution-id
                                                      :type type
                                                      :state-name state-name
-                                                     :detail (json/generate-string detail)})))
+                                                     :detail (json/generate-string detail)}))
+                             :aborted? #(deref flag)
+                             :execution-id execution-id)
                  (catch Exception e
-                   {:status "FAILED" :error "States.Runtime" :cause (ex-message e)}))]
+                   {:status "FAILED" :error "States.Runtime" :cause (ex-message e)})
+                 (finally (swap! abort-flags dissoc execution-id)))]
     (db/finish-execution! ds execution-id
                           {:status (:status result)
                            :output (some-> (:output result) json/generate-string)
@@ -60,6 +70,20 @@
                            :cause (:cause result)})
     (db/prune-executions! ds (:id machine))
     (assoc result :execution-id execution-id)))
+
+(defn stop-execution!
+  "Stop a RUNNING execution: flag its engine loop, release and cancel
+  its in-flight tasks.  An execution whose run is gone (say the server
+  restarted under it) is closed as ABORTED directly.  Returns whether
+  anything was stopped."
+  [ds execution-id]
+  (let [e (db/execution ds execution-id)]
+    (when (= "RUNNING" (:status e))
+      (if-let [flag (get @abort-flags execution-id)]
+        (do (reset! flag true)
+            (dispatch/abort-execution! execution-id))
+        (db/finish-execution! ds execution-id {:status "ABORTED"}))
+      true)))
 
 (defn execute!
   "Run MACHINE on INPUT-JSON synchronously, recording the execution and

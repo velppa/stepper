@@ -3,6 +3,7 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [stepper.db :as db]
+            [stepper.run]
             [stepper.web]))
 
 (def ^:private route #'stepper.web/route)
@@ -31,6 +32,28 @@
     (is (= "/machine/hello" (get-in resp [:headers "Location"])))
     (is (= 1 (->> (db/state-machine-by-name ds "hello") :id
                   (db/current-version ds) :version)))))
+
+(deftest stop-route-aborts-running-execution
+  (let [ds (fresh-db)
+        handler (route ds)
+        _ (db/create-state-machine!
+           ds {:id "sm1" :name "m"
+               :definition (json/generate-string
+                            {"StartAt" "Sleep"
+                             "States" {"Sleep" {"Type" "Task"
+                                                "Resource" "arn:localhost:stepper:::shell:runCommand"
+                                                "Arguments" {"command" "sleep 60"}
+                                                "End" true}}})})
+        id (stepper.run/execute-async! ds (db/state-machine ds "sm1") "{}" {:name "e1"})]
+    (Thread/sleep 500)
+    (let [resp (post handler (str "/execution/" id "/stop") {})]
+      (is (= 303 (:status resp)))
+      (is (= (str "/execution/" id) (get-in resp [:headers "Location"]))))
+    (loop [n 0]
+      (when (and (< n 40) (= "RUNNING" (:status (db/execution ds id))))
+        (Thread/sleep 100)
+        (recur (inc n))))
+    (is (= "ABORTED" (:status (db/execution ds id))))))
 
 (deftest create-machine-rejects-bad-input
   (let [ds (fresh-db)

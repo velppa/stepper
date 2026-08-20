@@ -28,8 +28,28 @@
     (when (or error (not= 200 status))
       (println "result not delivered:" (or error status)))))
 
+(def ^:private running
+  ;; task id -> future; cancelling interrupts the task, which kills its
+  ;; process (stepper.resource) and fails it with States.Aborted
+  (atom {}))
+
+(defn- start-task!
+  "Run TASK in the background, posting the outcome when it finishes."
+  [server client task]
+  (let [id (get task "id")]
+    (println "task" id "-" (get task "resource"))
+    (swap! running assoc id
+           (future
+             (try (post-result! server client (assoc (outcome task) "id" id))
+                  (finally (swap! running dissoc id)))))))
+
+(defn- stop-task! [id]
+  (println "stop" id)
+  (some-> (get @running id) future-cancel))
+
 (defn- poll-once!
-  "One long-poll iteration; runs the task when one arrived."
+  "One long-poll iteration; polling continues while tasks run, so a stop
+  message can reach a task in flight."
   [server client]
   (let [{:keys [status body error]}
         @(http/get (str server "/client/" client "/poll")
@@ -37,10 +57,10 @@
     (cond
       error (do (println "poll failed:" error "- retrying in 5s")
                 (Thread/sleep 5000))
-      (= 200 status) (let [task (json/parse-string body)]
-                       (println "task" (get task "id") "-" (get task "resource"))
-                       (post-result! server client
-                                     (assoc (outcome task) "id" (get task "id"))))
+      (= 200 status) (let [message (json/parse-string body)]
+                       (if (= "stop" (get message "type"))
+                         (stop-task! (get message "id"))
+                         (start-task! server client message)))
       (= 204 status) nil
       :else (do (println "unexpected poll status:" status "- retrying in 5s")
                 (Thread/sleep 5000)))))

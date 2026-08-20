@@ -11,7 +11,8 @@
 
 (defonce ^:private state
   (atom {:clients {}    ; name -> {:chan ... :last-poll ...}
-         :pending {}})) ; task id -> promise
+         :pending {}    ; task id -> {:promise :client :execution-id}
+         :running {}})) ; task id -> future (localhost tasks)
 
 (defn- client-chan [name]
   (or (get-in @state [:clients name :chan])
@@ -46,7 +47,8 @@
         await-ms (if-let [t (get arguments "timeout_seconds")]
                    (+ (* 1000 (long t)) await-margin-ms)
                    default-await-ms)]
-    (swap! state assoc-in [:pending id] p)
+    (swap! state assoc-in [:pending id]
+           {:promise p :client client :execution-id (:execution-id ctx)})
     (async/>!! (client-chan client)
                {:id id :resource arn :arguments arguments :ctx ctx})
     (try
@@ -58,6 +60,17 @@
                                        arn " in time")}))
           (outcome->result outcome)))
       (finally (swap! state update :pending dissoc id)))))
+
+(defn abort-execution!
+  "Abort the in-flight tasks of EXECUTION-ID: each task's client gets a
+  {:type \"stop\" :id ...} message on its channel so it can kill the
+  work, and the awaiting engine is released with States.Aborted."
+  [execution-id]
+  (doseq [[id {:keys [promise client] :as task}] (:pending @state)
+          :when (= execution-id (:execution-id task))]
+    (async/>!! (client-chan client) {:type "stop" :id id})
+    (deliver promise {:error "States.Aborted"
+                      :cause "execution stopped"})))
 
 (defn poll!
   "Next Task for CLIENT, waiting up to TIMEOUT-MS; nil when none came.
@@ -73,27 +86,32 @@
   reported by a client.  Unknown ids (an answer after the await gave
   up) are ignored; returns whether the outcome landed."
   [id outcome]
-  (if-let [p (get-in @state [:pending id])]
+  (if-let [p (get-in @state [:pending id :promise])]
     (do (deliver p outcome) true)
     false))
 
 (defn- run-local
   "Execute TASK in this process and complete it."
   [{:keys [id resource arguments ctx]}]
-  (complete! id
-             (try {:result (resource/invoke resource arguments (or ctx {}))}
-                  (catch Exception e
-                    {:error (or (:error (ex-data e)) "States.TaskFailed")
-                     :cause (or (:cause (ex-data e)) (ex-message e))}))))
+  (try
+    (complete! id
+               (try {:result (resource/invoke resource arguments (or ctx {}))}
+                    (catch Exception e
+                      {:error (or (:error (ex-data e)) "States.TaskFailed")
+                       :cause (or (:cause (ex-data e)) (ex-message e))})))
+    (finally (swap! state update :running dissoc id))))
 
 (defonce ^:private localhost-worker
   (delay (doto (Thread.
                 (fn []
                   (loop []
-                    (when-let [task (async/<!! (client-chan "localhost"))]
-                      ;; one future per task - parallel branches must not
-                      ;; queue behind a long-running localhost task
-                      (future (run-local task))
+                    (when-let [{:keys [type id] :as task}
+                               (async/<!! (client-chan "localhost"))]
+                      (if (= "stop" type)
+                        (some-> (get-in @state [:running id]) future-cancel)
+                        ;; one future per task - parallel branches must not
+                        ;; queue behind a long-running localhost task
+                        (swap! state assoc-in [:running id] (future (run-local task))))
                       (recur))))
                 "stepper-localhost-worker")
            (.setDaemon true)

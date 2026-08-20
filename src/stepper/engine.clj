@@ -89,10 +89,14 @@
                  :else 0)]
     (when (pos? millis) (Thread/sleep millis))))
 
-(defn- run-branch [definition input on-event variables]
-  (let [result (run definition input on-event :variables variables)]
-    (if (= "SUCCEEDED" (:status result))
-      (:output result)
+(defn- run-branch [definition input on-event variables {:keys [aborted? execution-id]}]
+  (let [result (run definition input on-event :variables variables
+                    :aborted? aborted? :execution-id execution-id)]
+    (case (:status result)
+      "SUCCEEDED" (:output result)
+      "ABORTED" (throw (ex-info "branch aborted"
+                                {:error "States.Aborted"
+                                 :cause "execution stopped"}))
       (throw (ex-info "branch failed"
                       {:error (or (:error result) "States.BranchFailed")
                        :cause (:cause result)})))))
@@ -117,12 +121,12 @@
               :error (eval-template (get state "Error" "States.Error") env)
               :cause (eval-template (get state "Cause") env)}
 
-      "Parallel" {:result (mapv #(run-branch % input on-event variables)
+      "Parallel" {:result (mapv #(run-branch % input on-event variables ctx)
                                 (get state "Branches"))}
 
       "Map" (let [items (eval-template (get state "Items" "{% $states.input %}") env)
                   processor (get state "ItemProcessor")]
-              {:result (mapv #(run-branch processor % on-event variables) items)})
+              {:result (mapv #(run-branch processor % on-event variables ctx) items)})
 
       (throw (ex-info (str "State type not implemented: " (get state "Type"))
                       {:error "States.Runtime"
@@ -135,8 +139,9 @@
     (let [outcome (try {:ok (thunk)}
                        (catch Exception e {:failure (task-failure e)}))]
       (if-let [{:keys [error cause]} (:failure outcome)]
-        (let [retrier (some #(when (error-matches? (get % "ErrorEquals") error) %)
-                            (get state "Retry"))]
+        (let [retrier (when-not (= "States.Aborted" error)
+                        (some #(when (error-matches? (get % "ErrorEquals") error) %)
+                              (get state "Retry")))]
           (on-event {:type "TaskFailed" :state-name state-name
                      :detail {"error" error "cause" cause}})
           (if (and retrier (< attempt (get retrier "MaxAttempts" 3)))
@@ -147,14 +152,21 @@
 
 (defn run
   "Run machine DEFINITION (parsed ASL) on INPUT, calling ON-EVENT with
-  each history event.  Returns {:status \"SUCCEEDED\" :output ...} or
-  {:status \"FAILED\" :error ... :cause ...}."
-  [definition input on-event & {:keys [variables] :or {variables {}}}]
+  each history event.  ABORTED? is polled between states and a
+  States.Aborted task failure bypasses Retry and Catch - either way the
+  run ends {:status \"ABORTED\"}.  Returns {:status \"SUCCEEDED\"
+  :output ...}, {:status \"FAILED\" :error ... :cause ...} or
+  {:status \"ABORTED\"}."
+  [definition input on-event & {:keys [variables aborted? execution-id]
+                                :or {variables {} aborted? (constantly false)}}]
   (when-let [ql (get definition "QueryLanguage")]
     (assert (= ql "JSONata") "only JSONata query language is supported"))
   (loop [state-name (get definition "StartAt")
          input input
          variables variables]
+    (if (aborted?)
+      (do (on-event {:type "ExecutionAborted" :state-name state-name :detail {}})
+          {:status "ABORTED"})
     (let [state (get-in definition ["States" state-name])
           _ (when-not state
               (throw (ex-info (str "state not found: " state-name) {})))
@@ -163,10 +175,14 @@
           outcome (try
                     (with-retry state on-event state-name
                       #(attempt-state state input on-event variables
-                                      {:on-event on-event :state-name state-name}))
+                                      {:on-event on-event :state-name state-name
+                                       :aborted? aborted? :execution-id execution-id}))
                     (catch Exception e {:caught (task-failure e)}))]
       (if-let [{:keys [error cause]} (and (map? outcome) (:caught outcome))]
-        ;; Route through Catch or fail the execution.
+        ;; Aborted bypasses Catch; otherwise route through Catch or fail.
+        (if (= "States.Aborted" error)
+          (do (on-event {:type "ExecutionAborted" :state-name state-name :detail {}})
+              {:status "ABORTED"})
         (if-let [catcher (some #(when (error-matches? (get % "ErrorEquals") error) %)
                                (get state "Catch"))]
           (let [error-output {"Error" error "Cause" cause}]
@@ -175,7 +191,7 @@
             (recur (get catcher "Next") error-output variables))
           (do (on-event {:type "ExecutionFailed" :state-name state-name
                          :detail {"error" error "cause" cause}})
-              {:status "FAILED" :error error :cause cause}))
+              {:status "FAILED" :error error :cause cause})))
         (let [{:keys [result next end error cause]} outcome
               env {:input input
                    :states (states-var input "result" result)
@@ -199,4 +215,4 @@
                 {:status "SUCCEEDED" :output output})
 
             :else
-            (recur (or next (get state "Next")) output variables)))))))
+            (recur (or next (get state "Next")) output variables))))))))

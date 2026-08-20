@@ -126,6 +126,12 @@
     (describe-execution e)
     (api-error "ExecutionDoesNotExist" executionArn)))
 
+(defmethod action "StopExecution" [_ ds {:strs [executionArn]}]
+  (if-let [e (execution-by-arn ds executionArn)]
+    (do (run/stop-execution! ds (:id e))
+        {"stopDate" (epoch (str (java.time.Instant/now)))})
+    (api-error "ExecutionDoesNotExist" executionArn)))
+
 (defmethod action "ListExecutions" [_ ds {:strs [stateMachineArn]}]
   (if-let [m (machine-by-arn ds stateMachineArn)]
     {"executions"
