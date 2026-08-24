@@ -99,6 +99,11 @@
          "stateMachineVersionArn" (version-arn (:name m) (:version v))}))
     (api-error "StateMachineDoesNotExist" stateMachineArn)))
 
+(defmethod action "DeleteStateMachine" [_ ds {:strs [stateMachineArn]}]
+  (if-let [m (machine-by-arn ds stateMachineArn)]
+    (do (db/delete-state-machine! ds (:id m)) {})
+    (api-error "StateMachineDoesNotExist" stateMachineArn)))
+
 (defmethod action "ListStateMachineVersions" [_ ds {:strs [stateMachineArn]}]
   (if-let [m (machine-by-arn ds stateMachineArn)]
     {"stateMachineVersions"

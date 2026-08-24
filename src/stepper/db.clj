@@ -83,6 +83,21 @@
 (defn state-machine-by-name [ds name]
   (jdbc/execute-one! ds ["SELECT * FROM state_machine WHERE name = ?" name] opts))
 
+(defn delete-state-machine!
+  "Delete a state machine and everything under it: its schedules and
+  their firings, its executions and their events, and every stored
+  version."
+  [ds id]
+  (jdbc/with-transaction [tx ds]
+    (jdbc/execute! tx ["DELETE FROM execution_event WHERE execution_id IN
+                        (SELECT id FROM execution WHERE state_machine_id = ?)" id])
+    (jdbc/execute! tx ["DELETE FROM execution WHERE state_machine_id = ?" id])
+    (jdbc/execute! tx ["DELETE FROM firing WHERE schedule_id IN
+                        (SELECT id FROM schedule WHERE state_machine_id = ?)" id])
+    (jdbc/execute! tx ["DELETE FROM schedule WHERE state_machine_id = ?" id])
+    (jdbc/execute! tx ["DELETE FROM state_machine_version WHERE state_machine_id = ?" id])
+    (jdbc/execute! tx ["DELETE FROM state_machine WHERE id = ?" id])))
+
 (defn create-execution! [ds {:keys [id state-machine-id state-machine-version-id name input]}]
   (jdbc/execute-one! ds ["INSERT INTO execution (id, state_machine_id, state_machine_version_id, name, input)
                           VALUES (?, ?, ?, ?, ?)"

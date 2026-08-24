@@ -55,6 +55,26 @@
         (recur (inc n))))
     (is (= "ABORTED" (:status (db/execution ds id))))))
 
+(deftest delete-machine-via-web-cascades
+  (let [ds (fresh-db)
+        handler (route ds)
+        _ (db/create-state-machine! ds {:id "sm1" :name "m" :definition definition})
+        id (stepper.run/execute-async! ds (db/state-machine ds "sm1") "{}" {:name "e1"})
+        _ (db/create-schedule! ds {:id "sched1" :state-machine-id "sm1"
+                                   :expression "rate(1 hours)" :input nil
+                                   :next-run-at "2099-01-01T00:00:00.000Z"})]
+    (loop [n 0]
+      (when (and (< n 40) (= "RUNNING" (:status (db/execution ds id))))
+        (Thread/sleep 50)
+        (recur (inc n))))
+    (let [resp (post handler "/machine/m/delete" {})]
+      (is (= 303 (:status resp)))
+      (is (= "/" (get-in resp [:headers "Location"]))))
+    (is (nil? (db/state-machine-by-name ds "m")))
+    (is (nil? (db/execution ds id)))
+    (is (empty? (db/events ds id)))
+    (is (nil? (db/schedule ds "sched1")))))
+
 (deftest create-machine-rejects-bad-input
   (let [ds (fresh-db)
         handler (route ds)]

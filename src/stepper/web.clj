@@ -223,6 +223,8 @@
     (page
      [:h2 name]
      [:p "ARN: " [:code (api/machine-arn name)]]
+     [:form {:method "post" :action (str "/machine/" name "/delete") :style "display:inline"}
+      [:button {:class "danger"} "Delete state machine"]]
      [:form {:method "post" :action (str "/machine/" name "/start") :class "row"}
       [:input {:name "input" :placeholder "{\"input\": \"json\"}"}]
       [:input {:name "execution" :placeholder "execution name (optional)"}]
@@ -514,6 +516,12 @@
 
        (re-matches #"/machine/([^/]+)" uri)
        (machine-page ds (second (re-matches #"/machine/([^/]+)" uri)))
+
+       (and (= request-method :post) (re-matches #"/machine/([^/]+)/delete" uri))
+       (let [name (second (re-matches #"/machine/([^/]+)/delete" uri))]
+         (when-let [machine (db/state-machine-by-name ds name)]
+           (db/delete-state-machine! ds (:id machine)))
+         {:status 303 :headers {"Location" "/"}})
 
        (and (= request-method :post) (re-matches #"/machine/([^/]+)/definition" uri))
        (let [name (second (re-matches #"/machine/([^/]+)/definition" uri))
