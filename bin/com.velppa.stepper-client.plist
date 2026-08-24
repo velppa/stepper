@@ -9,17 +9,12 @@
 	<string>com.velppa.stepper-client</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>/Users/pavel/.local/share/mise/installs/java/latest/bin/java</string>
-		<string>-jar</string>
-		<string>/Users/pavel/.velppa/stepper/target/stepper-client.jar</string>
-		<string>https://stepper.hotter.myaddr.dev</string>
-		<string>m4pro</string>
+		<string>/bin/zsh</string>
+		<string>-lc</string>
+		<string>exec make start-client</string>
 	</array>
-	<key>EnvironmentVariables</key>
-	<dict>
-		<key>PATH</key>
-		<string>/Users/pavel/.local/bin:/Users/pavel/.local/share/mise/shims:/opt/local/bin:/usr/local/bin:/usr/bin:/bin</string>
-	</dict>
+	<key>WorkingDirectory</key>
+	<string>/Users/pavel/.velppa/stepper</string>
 	<key>RunAtLoad</key>
 	<true/>
 	<key>KeepAlive</key>

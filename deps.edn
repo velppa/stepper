@@ -12,6 +12,7 @@
         org.clojure/core.async {:mvn/version "1.6.681"}}
  :aliases
  {:run {:main-opts ["-m" "stepper.core"]}
+  :client {:main-opts ["-m" "stepper.client"]}
   :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.5"}}
           :ns-default build}
   :test {:extra-paths ["test"]
