@@ -73,6 +73,14 @@
   [_ {:strs [command] :as arguments} _ctx]
   (run-process ["/bin/sh" "-c" (str command)] arguments))
 
+(defn- unanswered-question?
+  "True when TEXT, trimmed, ends with a question mark.  claude -p runs
+  with stdin on /dev/null (see run-process) - there is no channel back
+  for an answer, so a trailing question means the run stopped short of
+  finishing rather than genuinely needing input no one can give it."
+  [text]
+  (and (string? text) (not (str/blank? text)) (str/ends-with? (str/trimr text) "?")))
+
 ;; Claude Code prompt runner: claude -p <prompt> --output-format json.
 ;; Arguments:
 ;;   prompt - the prompt text
@@ -86,7 +94,9 @@
 ;; session information (session_id, total_cost_usd, num_turns,
 ;; duration_ms, usage, ...) - with stderr/exit_code added; when stdout
 ;; is not a JSON object the raw {stdout, stderr, exit_code} is
-;; returned, session_id added.
+;; returned, session_id added.  A reply ending in a question fails the
+;; task with Claude.UnansweredQuestion instead of succeeding, since
+;; nothing will ever answer it.
 (defmethod invoke "claude:runPrompt"
   [_ {:strs [prompt claude args] :as arguments} {:keys [on-event state-name]}]
   (when-not (and (string? prompt) (not (str/blank? prompt)))
@@ -103,11 +113,18 @@
                                     (map str args))
                               arguments)
           parsed (try (json/parse-string (get result "stdout"))
-                      (catch Exception _ nil))]
-      (if (map? parsed)
-        (merge {"session_id" session-id} parsed
-               (select-keys result ["stderr" "exit_code"]))
-        (assoc result "session_id" session-id)))))
+                      (catch Exception _ nil))
+          output (if (map? parsed)
+                   (merge {"session_id" session-id} parsed
+                          (select-keys result ["stderr" "exit_code"]))
+                   (assoc result "session_id" session-id))
+          reply (if (map? parsed) (get parsed "result") (get result "stdout"))]
+      (if (unanswered-question? reply)
+        (throw (ex-info "claude -p ended with a question"
+                        {:error "Claude.UnansweredQuestion"
+                         :cause (str "no one can answer it, so the run did not finish: " reply)
+                         :result output}))
+        output))))
 
 ;; Script file runner, via bash.  Arguments:
 ;;   file - path to a script file
