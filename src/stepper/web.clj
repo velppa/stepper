@@ -92,7 +92,9 @@
 
    .view strong,.view a{margin-right:.6rem;font-size:.9rem}
    .tl{position:relative;height:.4rem;width:9rem;background:var(--hair)}
-   .tl b{position:absolute;top:0;bottom:0;background:currentColor}")
+   .tl b{position:absolute;top:0;bottom:0;background:currentColor}
+
+   .exec-list{max-height:32rem;overflow-y:auto}")
 
 (defn- render [status & body]
   {:status status
@@ -230,16 +232,17 @@
       [:input {:name "execution" :placeholder "execution name (optional)"}]
       [:button "Start execution"]]
      [:h3 "Executions"]
-     [:table
-      [:tr [:th "name"] [:th "version"] [:th "status"] [:th "started"] [:th "stopped"]]
-      (for [e (db/executions ds (:id machine))
-            :let [v (some->> (:state-machine-version-id e) (db/version ds))]]
-        [:tr
-         [:td [:a {:href (str "/execution/" (:id e))} (:name e)]]
-         [:td (:version v)]
-         [:td {:class (str "status " (:status e))} (:status e)]
-         [:td (local-time (:started-at e))]
-         [:td (local-time (:stopped-at e))]])]
+     [:div {:class "exec-list"}
+      [:table
+       [:tr [:th "name"] [:th "version"] [:th "status"] [:th "started"] [:th "stopped"]]
+       (for [e (db/executions ds (:id machine))
+             :let [v (some->> (:state-machine-version-id e) (db/version ds))]]
+         [:tr
+          [:td [:a {:href (str "/execution/" (:id e))} (:name e)]]
+          [:td (:version v)]
+          [:td {:class (str "status " (:status e))} (:status e)]
+          [:td (local-time (:started-at e))]
+          [:td (local-time (:stopped-at e))]])]]
      (let [versions (db/versions ds (:id machine))
            current (first versions)]
        (list
