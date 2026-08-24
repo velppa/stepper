@@ -226,7 +226,10 @@
      [:h2 name]
      [:p "ARN: " [:code (api/machine-arn name)]]
      [:form {:method "post" :action (str "/machine/" name "/delete") :style "display:inline"}
-      [:button {:class "danger"} "Delete state machine"]]
+      [:button {:class "danger"
+                :onclick (str "return confirm('Delete " name
+                              " and all its executions, schedules and versions?')")}
+       "Delete state machine"]]
      [:form {:method "post" :action (str "/machine/" name "/start") :class "row"}
       [:input {:name "input" :placeholder "{\"input\": \"json\"}"}]
       [:input {:name "execution" :placeholder "execution name (optional)"}]
