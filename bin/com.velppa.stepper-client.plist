@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
-<!-- Stepper client on m4pro.  Install:
+<!-- Stepper client.  Install:
      cp bin/com.velppa.stepper-client.plist ~/Library/LaunchAgents/
      launchctl load ~/Library/LaunchAgents/com.velppa.stepper-client.plist -->
 <dict>
@@ -17,8 +17,6 @@
 	</array>
 	<key>EnvironmentVariables</key>
 	<dict>
-		<key>STEPPER_API_TOKEN</key>
-		<string>269f3d44c2bd1f1012f884319583a618972d1be8a6209dc3</string>
 		<key>PATH</key>
 		<string>/Users/pavel/.local/bin:/Users/pavel/.local/share/mise/shims:/opt/local/bin:/usr/local/bin:/usr/bin:/bin</string>
 	</dict>
