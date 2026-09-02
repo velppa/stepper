@@ -9,8 +9,6 @@ start-server:
 	STEPPER_BASE_URL="https://stepper.hotter.myaddr.dev" \
 	clojure -M:run serve 8323
 
-# The API token lives in the Keychain, never committed - fetched via
-# Emacs' auth-source at startup.
 start-client:
 	STEPPER_API_TOKEN="$$(TMPDIR=$$(getconf DARWIN_USER_TEMP_DIR) emacsclient -e '(cadr (auth-source-user-and-password "stepper.hotter.myaddr.dev" "velppa^m4pro"))' | sed -e 's/^"//' -e 's/"$$//')" \
 	clojure -M:client https://stepper.hotter.myaddr.dev m4pro

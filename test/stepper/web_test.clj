@@ -12,6 +12,9 @@
   (doto (db/datasource (str (java.io.File/createTempFile "stepper" ".db")))
     db/migrate!))
 
+(defn- get* [handler uri]
+  (handler {:uri uri :request-method :get}))
+
 (defn- post [handler uri params]
   (handler {:uri uri
             :request-method :post
@@ -74,6 +77,13 @@
     (is (nil? (db/execution ds id)))
     (is (empty? (db/events ds id)))
     (is (nil? (db/schedule ds "sched1")))))
+
+(deftest machine-page-title-includes-machine-name
+  (let [ds (fresh-db)
+        handler (route ds)]
+    (post handler "/machine" {"name" "hello" "definition" definition})
+    (is (str/includes? (:body (get* handler "/machine/hello")) "<title>hello | Stepper</title>"))
+    (is (str/includes? (:body (get* handler "/")) "<title>Stepper</title>"))))
 
 (deftest create-machine-rejects-bad-input
   (let [ds (fresh-db)

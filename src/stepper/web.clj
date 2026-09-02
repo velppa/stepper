@@ -96,6 +96,11 @@
 
    .exec-list{max-height:32rem;overflow-y:auto}")
 
+(def ^:dynamic *title*
+  "Page's <title>; bind to \"{state-machine-name} | Stepper\" on pages
+  scoped to one state machine."
+  "Stepper")
+
 (defn- render [status & body]
   {:status status
    :headers {"Content-Type" "text/html"}
@@ -105,7 +110,7 @@
                  [:meta {:charset "utf-8"}]
                  [:meta {:name "viewport" :content "width=device-width, initial-scale=1"}]
                  [:meta {:name "color-scheme" :content "light dark"}]
-                 [:title "Stepper"]
+                 [:title *title*]
                  [:script {:src "https://unpkg.com/htmx.org@2.0.4"}]
                  ;; raw, or hiccup escapes the child selectors' > into &gt;
                  [:style (h/raw style)]]
@@ -222,6 +227,7 @@
 
 (defn- machine-page [ds name]
   (when-let [machine (db/state-machine-by-name ds name)]
+   (binding [*title* (str name " | Stepper")]
     (page
      [:h2 name]
      [:p "ARN: " [:code (api/machine-arn name)]]
@@ -260,16 +266,17 @@
          (for [v versions]
            [:tr
             [:td [:a {:href (str "/machine/" name "/version/" (:version v))} (:version v)]]
-            [:td (local-time (:created-at v))]])])))))
+            [:td (local-time (:created-at v))]])]))))))
 
 (defn- version-page [ds name version]
   (when-let [machine (db/state-machine-by-name ds name)]
     (when-let [v (first (filter #(= version (:version %)) (db/versions ds (:id machine))))]
-      (page
-       [:h2 [:a {:href (str "/machine/" name)} name] " — version " version]
-       [:p "ARN: " [:code (api/version-arn name version)]]
-       [:p "created: " (local-time (:created-at v))]
-       [:pre (pretty (:definition v))]))))
+      (binding [*title* (str name " | Stepper")]
+       (page
+        [:h2 [:a {:href (str "/machine/" name)} name] " — version " version]
+        [:p "ARN: " [:code (api/version-arn name version)]]
+        [:p "created: " (local-time (:created-at v))]
+        [:pre (pretty (:definition v))])))))
 
 (defn- state-specs
   "NAME -> state spec from a definition, including states nested in
@@ -421,6 +428,7 @@
 (defn- schedule-page [ds id]
   (when-let [s (db/schedule ds id)]
     (let [machine (db/state-machine ds (:state-machine-id s))]
+     (binding [*title* (str (:name machine) " | Stepper")]
       (page
        [:h2 "Schedule " (:expression s)]
        [:p "machine: " [:a {:href (str "/machine/" (:name machine))} (:name machine)]]
@@ -447,21 +455,22 @@
         (for [f (db/firings ds id)]
           [:tr
            [:td (local-time (:fired-at f))]
-           [:td (execution-link ds (:execution-arn f))]])]))))
+           [:td (execution-link ds (:execution-arn f))]])])))))
 
 (defn- execution-page [ds id view]
   (when-let [e (db/execution ds id)]
-    (page
-     [:h2 "Execution " (:name e)]
-     (let [machine (db/state-machine ds (:state-machine-id e))
-           v (some->> (:state-machine-version-id e) (db/version ds))]
-       [:p "machine: " [:a {:href (str "/machine/" (:name machine))} (:name machine)]
-        (when v
-          (list " — version "
-                [:a {:href (str "/machine/" (:name machine) "/version/" (:version v))}
-                 (:version v)]))])
-     (when (:input e) [:div [:h3 "Input"] [:pre (pretty (:input e))]])
-     (execution-fragment ds id view))))
+    (let [machine (db/state-machine ds (:state-machine-id e))
+          v (some->> (:state-machine-version-id e) (db/version ds))]
+      (binding [*title* (str (:name machine) " | Stepper")]
+       (page
+        [:h2 "Execution " (:name e)]
+        [:p "machine: " [:a {:href (str "/machine/" (:name machine))} (:name machine)]
+         (when v
+           (list " — version "
+                 [:a {:href (str "/machine/" (:name machine) "/version/" (:version v))}
+                  (:version v)]))]
+        (when (:input e) [:div [:h3 "Input"] [:pre (pretty (:input e))]])
+        (execution-fragment ds id view))))))
 
 (defn- form-params [{:keys [body]}]
   (into {}
